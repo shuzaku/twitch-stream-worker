@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=1920, height=1080" />
+  <title>FightersEdge Stream Overlay</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      width: 1920px;
+      height: 1080px;
+      overflow: hidden;
+      background: transparent;
+      font-family: 'Segoe UI', 'Arial', sans-serif;
+    }
+
+    /* Bottom bar - now playing */
+    #now-playing-bar {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 60px;
+      background: linear-gradient(90deg, rgba(9,9,9,0.92) 0%, rgba(30,30,30,0.85) 100%);
+      border-top: 2px solid #e53e3e;
+      display: flex;
+      align-items: center;
+      padding: 0 24px;
+      gap: 16px;
+    }
+
+    #channel-logo {
+      font-size: 18px;
+      font-weight: 800;
+      color: #e53e3e;
+      letter-spacing: 1px;
+      white-space: nowrap;
+      text-transform: uppercase;
+    }
+
+    #divider {
+      width: 2px;
+      height: 32px;
+      background: #444;
+    }
+
+    #now-playing-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      white-space: nowrap;
+    }
+
+    #video-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: #fff;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      flex: 1;
+    }
+
+    #matchup {
+      font-size: 14px;
+      color: #ccc;
+      white-space: nowrap;
+    }
+
+    #game-tag {
+      background: #e53e3e;
+      color: #fff;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 4px 10px;
+      border-radius: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      white-space: nowrap;
+    }
+
+    /* Top-right: FightersEdge watermark */
+    #watermark {
+      position: absolute;
+      top: 16px;
+      right: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 2px;
+      opacity: 0.85;
+    }
+
+    #watermark-title {
+      font-size: 20px;
+      font-weight: 800;
+      color: #fff;
+      text-shadow: 0 2px 8px rgba(0,0,0,0.8);
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+
+    #watermark-subtitle {
+      font-size: 11px;
+      color: #e53e3e;
+      font-weight: 600;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="watermark">
+    <span id="watermark-title">FightersEdge</span>
+    <span id="watermark-subtitle">Fighting Game Hub</span>
+  </div>
+
+  <div id="now-playing-bar">
+    <span id="channel-logo">FightersEdge</span>
+    <div id="divider"></div>
+    <span id="now-playing-label">Now Playing</span>
+    <span id="video-title">Loading...</span>
+    <span id="matchup"></span>
+    <span id="game-tag" id="game-tag"></span>
+  </div>
+
+  <script>
+    async function fetchNowPlaying() {
+      try {
+        const res = await fetch('/api/now-playing')
+        const video = await res.json()
+        if (!video) return
+
+        const titleEl = document.getElementById('video-title')
+        const matchupEl = document.getElementById('matchup')
+        const gameEl = document.getElementById('game-tag')
+
+        titleEl.textContent = video.Title || `Match: ${video.Url}`
+
+        const parts = []
+        if (video.Player1) parts.push(video.Player1)
+        if (video.Player2) parts.push(video.Player2)
+        matchupEl.textContent = parts.length === 2 ? `${parts[0]} vs ${parts[1]}` : parts[0] || ''
+
+        gameEl.textContent = video.Game || ''
+        gameEl.style.display = video.Game ? 'inline-block' : 'none'
+      } catch (e) {
+        // silently retry
+      }
+    }
+
+    fetchNowPlaying()
+    setInterval(fetchNowPlaying, 3000)
+  </script>
+
+</body>
+</html>

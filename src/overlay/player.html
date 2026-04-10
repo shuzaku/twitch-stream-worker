@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>FightersEdge Player</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html, body {
+      width: 1920px;
+      height: 1080px;
+      overflow: hidden;
+      background: #000;
+      font-family: 'Segoe UI', Arial, sans-serif;
+    }
+
+    #yt-container {
+      position: absolute;
+      inset: 0;
+    }
+
+    /* YouTube iframe fills the whole page */
+    #yt-container iframe,
+    #yt-container > div {
+      width: 100% !important;
+      height: 100% !important;
+    }
+
+    /* ── Top-right watermark ─────────────────────────────────────── */
+    #watermark {
+      position: absolute;
+      top: 16px;
+      right: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 2px;
+      opacity: 0.85;
+      pointer-events: none;
+    }
+
+    #watermark-title {
+      font-size: 20px;
+      font-weight: 800;
+      color: #fff;
+      text-shadow: 0 2px 8px rgba(0,0,0,0.8);
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+
+    #watermark-subtitle {
+      font-size: 11px;
+      color: #e53e3e;
+      font-weight: 600;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+
+    /* ── Bottom now-playing bar ──────────────────────────────────── */
+    #now-playing-bar {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 60px;
+      background: linear-gradient(90deg, rgba(9,9,9,0.92) 0%, rgba(30,30,30,0.85) 100%);
+      border-top: 2px solid #e53e3e;
+      display: flex;
+      align-items: center;
+      padding: 0 24px;
+      gap: 16px;
+      pointer-events: none;
+    }
+
+    #channel-logo {
+      font-size: 18px;
+      font-weight: 800;
+      color: #e53e3e;
+      letter-spacing: 1px;
+      white-space: nowrap;
+      text-transform: uppercase;
+      flex-shrink: 0;
+    }
+
+    #divider {
+      width: 2px;
+      height: 32px;
+      background: #444;
+      flex-shrink: 0;
+    }
+
+    #now-playing-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    #video-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: #fff;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      flex: 1;
+      min-width: 0;
+    }
+
+    #matchup {
+      font-size: 14px;
+      color: #ccc;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    #game-tag {
+      background: #e53e3e;
+      color: #fff;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 4px 10px;
+      border-radius: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      white-space: nowrap;
+      flex-shrink: 0;
+      display: none;
+    }
+
+    /* Loading / waiting state */
+    #waiting {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #000;
+      color: #444;
+      font-size: 18px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="waiting">Waiting for playlist...</div>
+  <div id="yt-container"></div>
+
+  <div id="watermark">
+    <span id="watermark-title">FightersEdge</span>
+    <span id="watermark-subtitle">Fighting Game Hub</span>
+  </div>
+
+  <div id="now-playing-bar">
+    <span id="channel-logo">FightersEdge</span>
+    <div id="divider"></div>
+    <span id="now-playing-label">Now Playing</span>
+    <span id="video-title">Loading...</span>
+    <span id="matchup"></span>
+    <span id="game-tag"></span>
+  </div>
+
+  <!-- YouTube IFrame API -->
+  <script src="https://www.youtube.com/iframe_api"></script>
+  <script>
+    const WS_URL = `ws://${location.host}`
+
+    let player = null
+    let ws = null
+    let ytReady = false
+    let pendingVideoId = null
+
+    // ── YouTube IFrame API ────────────────────────────────────────────────
+
+    window.onYouTubeIframeAPIReady = function () {
+      ytReady = true
+      player = new YT.Player('yt-container', {
+        width: '1920',
+        height: '1080',
+        playerVars: {
+          autoplay: 1,
+          mute: 1,           // start muted so autoplay is allowed; we unmute on PLAYING
+          controls: 0,       // hide controls so OBS captures clean video
+          disablekb: 1,
+          fs: 0,
+          modestbranding: 1,
+          rel: 0,
+          iv_load_policy: 3, // hide annotations
+          cc_load_policy: 0,
+        },
+        events: {
+          onReady: onPlayerReady,
+          onStateChange: onPlayerStateChange,
+          onError: onPlayerError,
+        },
+      })
+    }
+
+    function onPlayerReady() {
+      if (pendingVideoId) {
+        player.loadVideoById(pendingVideoId)
+        pendingVideoId = null
+      }
+    }
+
+    function onPlayerStateChange(event) {
+      if (event.data === YT.PlayerState.PLAYING) {
+        // Unmute as soon as playback starts — autoplay only works muted,
+        // so we mute first then restore audio once the video is running.
+        player.unMute()
+        player.setVolume(100)
+      } else if (event.data === YT.PlayerState.ENDED) {
+        send({ type: 'ended' })
+      }
+    }
+
+    function onPlayerError(event) {
+      // YT error codes: 2=bad id, 5=html5 error, 100=not found, 101/150=embed blocked
+      send({ type: 'error', code: event.data })
+    }
+
+    function loadVideo(videoId) {
+      document.getElementById('waiting').style.display = 'none'
+      if (!player || !ytReady) {
+        pendingVideoId = videoId
+        return
+      }
+      player.loadVideoById(videoId)
+    }
+
+    // ── Overlay update ────────────────────────────────────────────────────
+
+    function updateOverlay(data) {
+      document.getElementById('video-title').textContent =
+        data.title || `Match: ${data.videoId}`
+
+      const matchup = (data.player1 && data.player2)
+        ? `${data.player1} vs ${data.player2}`
+        : (data.player1 || data.player2 || '')
+      document.getElementById('matchup').textContent = matchup
+
+      const gameEl = document.getElementById('game-tag')
+      if (data.game) {
+        gameEl.textContent = data.game
+        gameEl.style.display = 'inline-block'
+      } else {
+        gameEl.style.display = 'none'
+      }
+    }
+
+    // ── WebSocket ─────────────────────────────────────────────────────────
+
+    function send(msg) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(msg))
+      }
+    }
+
+    function connectWS() {
+      ws = new WebSocket(WS_URL)
+
+      ws.addEventListener('open', () => {
+        console.log('[ws] Connected to player server')
+      })
+
+      ws.addEventListener('message', (event) => {
+        let msg
+        try { msg = JSON.parse(event.data) } catch { return }
+
+        if (msg.type === 'play') {
+          updateOverlay(msg)
+          loadVideo(msg.videoId)
+        }
+      })
+
+      ws.addEventListener('close', () => {
+        console.warn('[ws] Disconnected — reconnecting in 2s')
+        setTimeout(connectWS, 2000)
+      })
+
+      ws.addEventListener('error', () => {
+        ws.close()
+      })
+    }
+
+    connectWS()
+  </script>
+</body>
+</html>

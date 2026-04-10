@@ -1,0 +1,32 @@
+{
+  "name": "twitch-stream-worker",
+  "version": "1.0.0",
+  "description": "24/7 Twitch stream worker for FightersEdge — controls OBS to stream a YouTube playlist via a browser-based player with a live overlay",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "nodemon --exec ts-node -r dotenv/config src/index.ts",
+    "build": "tsc",
+    "start": "node -r dotenv/config dist/index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@types/tmi.js": "^1.8.6",
+    "@types/ws": "^8.18.1",
+    "axios": "^1.15.0",
+    "dotenv": "^17.4.1",
+    "express": "^5.2.1",
+    "obs-websocket-js": "^5.0.8",
+    "tmi.js": "^1.8.5",
+    "ws": "^8.20.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.5.2",
+    "nodemon": "^3.1.14",
+    "ts-node": "^10.9.2",
+    "typescript": "^6.0.2"
+  }
+}

@@ -1,15 +1,15 @@
 import 'dotenv/config'
 import { spawn } from 'child_process'
 import { buildPlaylist, Video } from './api'
-import { startPlayerServer, playVideo } from './player-server'
+import { startPlayerServer, playVideo, waitForBrowser } from './player-server'
 import { OBSClient } from './obs-client'
 import { TwitchBot } from './twitch-bot'
 
-const QUEUE_SIZE           = parseInt(process.env.QUEUE_SIZE    || '10',   10)
-const RETRY_DELAY_MS       = 5000
+const QUEUE_SIZE             = parseInt(process.env.QUEUE_SIZE || '10', 10)
+const RETRY_DELAY_MS         = 5000
 const MAX_CONSECUTIVE_ERRORS = 5
-const PLAYER_PORT          = process.env.PLAYER_PORT || process.env.OVERLAY_PORT || '3001'
-const CHROME_PATH          = process.env.CHROME_PATH ||
+const PLAYER_PORT            = process.env.PLAYER_PORT || process.env.OVERLAY_PORT || '3001'
+const CHROME_PATH            = process.env.CHROME_PATH ||
   'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
 
 async function main() {
@@ -30,20 +30,35 @@ async function main() {
 
   chrome.on('error', (err) => {
     console.error(`[main] Failed to launch Chrome: ${err.message}`)
-    console.error(`[main] Set CHROME_PATH in .env to your Chrome executable path`)
+    console.error('[main] Set CHROME_PATH in .env to your Chrome executable path')
   })
 
-  console.log(`[main] Chrome launched — open OBS and point a Window/Browser source at ${playerUrl}`)
+  console.log(`[main] Chrome launched — open OBS and point a Browser Source at ${playerUrl}`)
 
-  // Give Chrome a moment to open before connecting OBS
-  await sleep(2000)
-
+  // While Chrome is loading, do all the slow async work in parallel:
+  //   - pre-fetch the first playlist batch
+  //   - connect to OBS and start the stream
+  //   - connect the Twitch bot
+  //   - wait for the browser WebSocket to connect
+  // Playback starts as soon as ALL of these are ready.
   const obs = new OBSClient()
-  await obs.connect()
-  await obs.startStream()
-
   const bot = new TwitchBot()
-  await bot.connect()
+
+  let initialPlaylist: Video[] = []
+
+  await Promise.all([
+    // Pre-fetch playlist
+    buildPlaylist(QUEUE_SIZE)
+      .then((videos) => { initialPlaylist = videos })
+      .catch((err) => console.error('[main] Failed to pre-fetch playlist:', err)),
+    // OBS + bot
+    obs.connect().then(() => obs.startStream()),
+    bot.connect(),
+    // Wait for browser WebSocket — this is the gate that holds playback
+    waitForBrowser().then(() => console.log('[main] Browser ready')),
+  ])
+
+  console.log('[main] All systems ready — starting playback')
 
   process.on('SIGINT', async () => {
     console.log('\n[main] Shutting down...')
@@ -62,8 +77,8 @@ async function main() {
     process.exit(0)
   })
 
-  // ── Infinite playlist loop ────────────────────────────────────────────
-  let playlist: Video[] = []
+  // ── Infinite playlist loop ────────────────────────────────────────────────
+  let playlist = initialPlaylist
   let playlistIndex = 0
   let consecutiveErrors = 0
 

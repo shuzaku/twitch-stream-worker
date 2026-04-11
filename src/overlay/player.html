@@ -202,6 +202,9 @@
     }
 
     function onPlayerReady() {
+      // Tell the server the YouTube player is fully initialised and ready to play
+      send({ type: 'ready' })
+
       if (pendingVideoId) {
         player.loadVideoById(pendingVideoId)
         pendingVideoId = null

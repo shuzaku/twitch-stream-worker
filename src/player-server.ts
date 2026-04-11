@@ -26,6 +26,16 @@ let browserSocket: WebSocket | null = null
 let pendingResolve: (() => void) | null = null
 let pendingReject: ((err: Error) => void) | null = null
 
+// Resolves once the browser sends { type: 'ready' } (YouTube player fully initialised)
+let browserReadyResolve: (() => void) | null = null
+const browserReadyPromise = new Promise<void>((resolve) => {
+  browserReadyResolve = resolve
+})
+
+export function waitForBrowser(): Promise<void> {
+  return browserReadyPromise
+}
+
 const server = http.createServer(app)
 const wss = new WebSocketServer({ server })
 
@@ -41,7 +51,11 @@ wss.on('connection', (ws) => {
       return
     }
 
-    if (msg.type === 'ended') {
+    if (msg.type === 'ready') {
+      console.log('[player] YouTube player ready')
+      browserReadyResolve?.()
+      browserReadyResolve = null
+    } else if (msg.type === 'ended') {
       console.log(`[player] Video ended: ${currentVideo?.Url}`)
       pendingResolve?.()
       pendingResolve = null
@@ -85,8 +99,8 @@ export function playVideo(video: Video): Promise<void> {
       videoId: video.Url,
       title: video.Title || null,
       game: video.Game || null,
-      player1: video.Player1 || null,
-      player2: video.Player2 || null,
+      player1: video.players?.[0]?.name || null,
+      player2: video.players?.[1]?.name || null,
     }))
   })
 }

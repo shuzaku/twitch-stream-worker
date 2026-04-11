@@ -47,10 +47,10 @@ export class TwitchBot {
     // YouTube link
     parts.push(`▶ https://youtu.be/${video.Url}`)
 
-    // Player profile links
+    // Player profile links — only include players that have a profile URL
     if (video.players && video.players.length > 0) {
       const playerLinks = video.players
-        .map((p) => `${p.name} → ${p.profileUrl}`)
+        .map((p) => p.profileUrl ? `${p.name} → ${p.profileUrl}` : p.name)
         .join('  |  ')
       parts.push(playerLinks)
     }

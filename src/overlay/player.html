@@ -213,10 +213,12 @@
 
     function onPlayerStateChange(event) {
       if (event.data === YT.PlayerState.PLAYING) {
-        // Unmute as soon as playback starts — autoplay only works muted,
-        // so we mute first then restore audio once the video is running.
+        // Unmute as soon as playback starts
         player.unMute()
         player.setVolume(100)
+      } else if (event.data === YT.PlayerState.CUED) {
+        // Video is cued/loaded but hasn't started — force play
+        player.playVideo()
       } else if (event.data === YT.PlayerState.ENDED) {
         send({ type: 'ended' })
       }
@@ -233,6 +235,8 @@
         pendingVideoId = videoId
         return
       }
+      // loadVideoById auto-plays; if autoplay is blocked it fires CUED state
+      // which we handle above by calling playVideo() explicitly
       player.loadVideoById(videoId)
     }
 

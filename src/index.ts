@@ -26,6 +26,9 @@ async function main() {
     '--autoplay-policy=no-user-gesture-required',
     '--no-default-browser-check',
     '--disable-extensions',
+    '--disable-background-timer-throttling',
+    '--disable-renderer-backgrounding',
+    '--disable-backgrounding-occluded-windows',
   ], { detached: false, stdio: 'ignore' })
 
   chrome.on('error', (err) => {

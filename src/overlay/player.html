@@ -3,6 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <title>FightersEdge Player</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700;800&display=swap" rel="stylesheet" />
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -10,16 +13,16 @@
       width: 1920px;
       height: 1080px;
       overflow: hidden;
-      background: #000;
-      font-family: 'Segoe UI', Arial, sans-serif;
+      background: #242832;
+      font-family: 'Roboto', sans-serif;
     }
 
+    /* ── YouTube container ───────────────────────────────────────── */
     #yt-container {
       position: absolute;
       inset: 0;
     }
 
-    /* YouTube iframe fills the whole page */
     #yt-container iframe,
     #yt-container > div {
       width: 100% !important;
@@ -29,31 +32,44 @@
     /* ── Top-right watermark ─────────────────────────────────────── */
     #watermark {
       position: absolute;
-      top: 16px;
-      right: 20px;
+      top: 18px;
+      right: 22px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      opacity: 0.92;
+      pointer-events: none;
+      filter: drop-shadow(0 2px 8px rgba(0,0,0,0.7));
+    }
+
+    #watermark img {
+      width: 36px;
+      height: 36px;
+      object-fit: contain;
+    }
+
+    #watermark-text {
       display: flex;
       flex-direction: column;
-      align-items: flex-end;
-      gap: 2px;
-      opacity: 0.85;
-      pointer-events: none;
+      align-items: flex-start;
+      gap: 1px;
     }
 
     #watermark-title {
-      font-size: 20px;
+      font-size: 18px;
       font-weight: 800;
       color: #fff;
-      text-shadow: 0 2px 8px rgba(0,0,0,0.8);
-      letter-spacing: 1px;
-      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      line-height: 1;
     }
 
     #watermark-subtitle {
-      font-size: 11px;
-      color: #e53e3e;
-      font-weight: 600;
-      letter-spacing: 2px;
+      font-size: 10px;
+      font-weight: 500;
+      color: #3eb489;
+      letter-spacing: 2.5px;
       text-transform: uppercase;
+      line-height: 1;
     }
 
     /* ── Bottom now-playing bar ──────────────────────────────────── */
@@ -62,46 +78,58 @@
       bottom: 0;
       left: 0;
       right: 0;
-      height: 60px;
-      background: linear-gradient(90deg, rgba(9,9,9,0.92) 0%, rgba(30,30,30,0.85) 100%);
-      border-top: 2px solid #e53e3e;
+      height: 64px;
+      background: linear-gradient(90deg, rgba(28,28,36,0.97) 0%, rgba(36,40,50,0.93) 100%);
+      border-top: 2px solid #3eb489;
       display: flex;
       align-items: center;
-      padding: 0 24px;
-      gap: 16px;
+      padding: 0 20px;
+      gap: 14px;
       pointer-events: none;
     }
 
-    #channel-logo {
-      font-size: 18px;
-      font-weight: 800;
-      color: #e53e3e;
-      letter-spacing: 1px;
-      white-space: nowrap;
-      text-transform: uppercase;
+    /* Logo section */
+    #bar-logo {
+      display: flex;
+      align-items: center;
+      gap: 8px;
       flex-shrink: 0;
     }
 
+    #bar-logo img {
+      width: 28px;
+      height: 28px;
+      object-fit: contain;
+    }
+
+    #bar-logo-text {
+      font-size: 15px;
+      font-weight: 800;
+      color: #3eb489;
+      letter-spacing: 0.5px;
+      white-space: nowrap;
+    }
+
     #divider {
-      width: 2px;
-      height: 32px;
-      background: #444;
+      width: 1px;
+      height: 34px;
+      background: rgba(255,255,255,0.15);
       flex-shrink: 0;
     }
 
     #now-playing-label {
-      font-size: 11px;
-      font-weight: 600;
-      color: #888;
+      font-size: 10px;
+      font-weight: 700;
+      color: #3eb489;
       text-transform: uppercase;
-      letter-spacing: 1px;
+      letter-spacing: 1.5px;
       white-space: nowrap;
       flex-shrink: 0;
     }
 
     #video-title {
-      font-size: 16px;
-      font-weight: 600;
+      font-size: 15px;
+      font-weight: 500;
       color: #fff;
       white-space: nowrap;
       overflow: hidden;
@@ -111,53 +139,79 @@
     }
 
     #matchup {
-      font-size: 14px;
-      color: #ccc;
+      font-size: 13px;
+      font-weight: 500;
+      color: rgba(255,255,255,0.7);
       white-space: nowrap;
       flex-shrink: 0;
     }
 
     #game-tag {
-      background: #e53e3e;
+      background: linear-gradient(135deg, #3eb489 0%, #2d8a6a 100%);
       color: #fff;
-      font-size: 11px;
+      font-size: 10px;
       font-weight: 700;
-      padding: 4px 10px;
+      padding: 5px 11px;
       border-radius: 4px;
       text-transform: uppercase;
-      letter-spacing: 0.5px;
+      letter-spacing: 1px;
       white-space: nowrap;
       flex-shrink: 0;
       display: none;
     }
 
-    /* Loading / waiting state */
+    /* ── Loading / waiting state ─────────────────────────────────── */
     #waiting {
       position: absolute;
       inset: 0;
       display: flex;
+      flex-direction: column;
       align-items: center;
       justify-content: center;
-      background: #000;
-      color: #444;
-      font-size: 18px;
-      letter-spacing: 2px;
+      background: #242832;
+      gap: 20px;
+    }
+
+    #waiting img {
+      width: 64px;
+      height: 64px;
+      object-fit: contain;
+      opacity: 0.6;
+    }
+
+    #waiting-text {
+      font-size: 14px;
+      font-weight: 500;
+      color: rgba(255,255,255,0.3);
+      letter-spacing: 3px;
       text-transform: uppercase;
     }
   </style>
 </head>
 <body>
 
-  <div id="waiting">Waiting for playlist...</div>
-  <div id="yt-container"></div>
-
-  <div id="watermark">
-    <span id="watermark-title">FightersEdge</span>
-    <span id="watermark-subtitle">Fighting Game Hub</span>
+  <div id="waiting">
+    <img src="https://res.cloudinary.com/shuzchef/image/upload/v1622816435/bb5h6tgdysfys9qi1du5.png" alt="" />
+    <span id="waiting-text">Loading playlist...</span>
   </div>
 
+  <div id="yt-container"></div>
+
+  <!-- Top-right watermark -->
+  <div id="watermark">
+    <img src="https://res.cloudinary.com/shuzchef/image/upload/v1622816435/bb5h6tgdysfys9qi1du5.png" alt="FightersEdge" />
+    <div id="watermark-text">
+      <span id="watermark-title">Fighters-Edge</span>
+      <span id="watermark-subtitle">Fighting Game Hub</span>
+    </div>
+  </div>
+
+  <!-- Bottom bar -->
   <div id="now-playing-bar">
-    <span id="channel-logo">FightersEdge</span>
+    <div id="bar-logo">
+      <img src="https://res.cloudinary.com/shuzchef/image/upload/v1622816435/bb5h6tgdysfys9qi1du5.png" alt="" />
+      <span id="bar-logo-text">Fighters-Edge</span>
+    </div>
     <div id="divider"></div>
     <span id="now-playing-label">Now Playing</span>
     <span id="video-title">Loading...</span>
@@ -184,13 +238,13 @@
         height: '1080',
         playerVars: {
           autoplay: 1,
-          mute: 1,           // start muted so autoplay is allowed; we unmute on PLAYING
-          controls: 0,       // hide controls so OBS captures clean video
+          mute: 1,           // start muted so autoplay is allowed; unmuted on PLAYING
+          controls: 0,
           disablekb: 1,
           fs: 0,
           modestbranding: 1,
           rel: 0,
-          iv_load_policy: 3, // hide annotations
+          iv_load_policy: 3,
           cc_load_policy: 0,
         },
         events: {
@@ -202,9 +256,7 @@
     }
 
     function onPlayerReady() {
-      // Tell the server the YouTube player is fully initialised and ready to play
       send({ type: 'ready' })
-
       if (pendingVideoId) {
         player.loadVideoById(pendingVideoId)
         pendingVideoId = null
@@ -213,11 +265,9 @@
 
     function onPlayerStateChange(event) {
       if (event.data === YT.PlayerState.PLAYING) {
-        // Unmute as soon as playback starts
         player.unMute()
         player.setVolume(100)
       } else if (event.data === YT.PlayerState.CUED) {
-        // Video is cued/loaded but hasn't started — force play
         player.playVideo()
       } else if (event.data === YT.PlayerState.ENDED) {
         send({ type: 'ended' })
@@ -225,7 +275,6 @@
     }
 
     function onPlayerError(event) {
-      // YT error codes: 2=bad id, 5=html5 error, 100=not found, 101/150=embed blocked
       send({ type: 'error', code: event.data })
     }
 
@@ -235,8 +284,6 @@
         pendingVideoId = videoId
         return
       }
-      // loadVideoById auto-plays; if autoplay is blocked it fires CUED state
-      // which we handle above by calling playVideo() explicitly
       player.loadVideoById(videoId)
     }
 
@@ -278,7 +325,6 @@
       ws.addEventListener('message', (event) => {
         let msg
         try { msg = JSON.parse(event.data) } catch { return }
-
         if (msg.type === 'play') {
           updateOverlay(msg)
           loadVideo(msg.videoId)

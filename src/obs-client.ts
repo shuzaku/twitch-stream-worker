@@ -1,15 +1,19 @@
 import OBSWebSocket, { OBSWebSocketError } from 'obs-websocket-js'
 
-const OBS_WS_URL      = process.env.OBS_WS_URL      || 'ws://localhost:4455'
-const OBS_WS_PASSWORD = process.env.OBS_WS_PASSWORD  || ''
-
 export class OBSClient {
   private obs = new OBSWebSocket()
   private connected = false
+  private readonly url: string
+  private readonly password: string
+
+  constructor(url?: string, password?: string) {
+    this.url      = url      ?? process.env.OBS_WS_URL      ?? 'ws://localhost:4455'
+    this.password = password ?? process.env.OBS_WS_PASSWORD ?? ''
+  }
 
   async connect(): Promise<void> {
     try {
-      await this.obs.connect(OBS_WS_URL, OBS_WS_PASSWORD || undefined)
+      await this.obs.connect(this.url, this.password || undefined)
       this.connected = true
       console.log('[obs] Connected to OBS WebSocket')
 

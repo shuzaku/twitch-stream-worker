@@ -6,12 +6,30 @@ import { Video } from './api'
 
 const PORT = parseInt(process.env.PLAYER_PORT || process.env.OVERLAY_PORT || '3001', 10)
 
+// Resolve overlay path relative to project root regardless of whether we are
+// running from src/ (ts-node) or dist-electron/src/ (compiled).
+function overlayDir(): string {
+  // Walk up from __dirname until we find src/overlay
+  const candidates = [
+    path.join(__dirname, 'overlay'),                      // ts-node: src/overlay
+    path.join(__dirname, '..', 'src', 'overlay'),         // dist-electron/src → project root
+    path.join(__dirname, '..', '..', 'src', 'overlay'),   // extra level just in case
+  ]
+  const fs = require('fs') as typeof import('fs')
+  for (const p of candidates) {
+    if (fs.existsSync(path.join(p, 'player.html'))) return p
+  }
+  return candidates[0]
+}
+
+const OVERLAY_DIR = overlayDir()
+
 const app = express()
 app.use(express.json())
-app.use(express.static(path.join(__dirname, 'overlay')))
+app.use(express.static(OVERLAY_DIR))
 
 app.get('/player', (_req, res) => {
-  res.sendFile(path.join(__dirname, 'overlay', 'player.html'))
+  res.sendFile(path.join(OVERLAY_DIR, 'player.html'))
 })
 
 // Legacy preview endpoint — still useful for monitoring
@@ -112,4 +130,15 @@ export function startPlayerServer(): Promise<void> {
       resolve()
     })
   })
+}
+
+export function stopPlayerServer(): Promise<void> {
+  return new Promise((resolve) => {
+    wss.close()
+    server.close(() => resolve())
+  })
+}
+
+export function getPlayerUrl(): string {
+  return `http://localhost:${PORT}/player`
 }

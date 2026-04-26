@@ -1,32 +1,50 @@
 {
-  "name": "twitch-stream-worker",
+  "name": "fighters-edge-autostream",
+  "productName": "FightersEdge AutoStream",
   "version": "1.0.0",
-  "description": "24/7 Twitch stream worker for FightersEdge — controls OBS to stream a YouTube playlist via a browser-based player with a live overlay",
-  "main": "dist/index.js",
+  "description": "Automated Twitch streaming desktop app for FightersEdge — streams your match VODs while you're away",
+  "main": "dist-electron/electron/main.js",
+  "type": "commonjs",
   "scripts": {
     "dev": "nodemon --exec ts-node -r dotenv/config src/index.ts",
-    "build": "tsc",
+    "build:worker": "tsc -p tsconfig.json",
+    "build:electron": "tsc -p electron/tsconfig.json",
+    "build:renderer": "vite build --config electron/renderer/vite.config.ts",
+    "build": "npm run build:worker && npm run build:electron && npm run build:renderer",
+    "electron:dev": "concurrently \"vite --config electron/renderer/vite.config.ts\" \"wait-on http://localhost:5173 && electron .\"",
+    "electron:pack": "npm run build && electron-builder --dir",
+    "electron:dist": "npm run build && electron-builder",
     "start": "node -r dotenv/config dist/index.js"
   },
   "keywords": [],
-  "author": "",
+  "author": "FightersEdge",
   "license": "ISC",
-  "type": "commonjs",
   "dependencies": {
     "@types/tmi.js": "^1.8.6",
     "@types/ws": "^8.18.1",
     "axios": "^1.15.0",
     "dotenv": "^17.4.1",
+    "electron-store": "^11.0.2",
     "express": "^5.2.1",
     "obs-websocket-js": "^5.0.8",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
     "tmi.js": "^1.8.5",
     "ws": "^8.20.0"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
     "@types/node": "^25.5.2",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "@vitejs/plugin-react": "^4.6.0",
+    "concurrently": "^9.2.1",
+    "electron": "^41.2.1",
+    "electron-builder": "^26.0.12",
     "nodemon": "^3.1.14",
     "ts-node": "^10.9.2",
-    "typescript": "^6.0.2"
+    "typescript": "^6.0.2",
+    "vite": "^6.3.5",
+    "wait-on": "^8.0.5"
   }
 }

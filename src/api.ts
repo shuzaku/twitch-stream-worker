@@ -202,7 +202,7 @@ async function resolveMatch(match: RawMatch): Promise<Video> {
 
 // ── Playlist builder ──────────────────────────────────────────────────────────
 
-export async function buildPlaylist(totalToFetch: number): Promise<Video[]> {
+export async function buildPlaylist(totalToFetch: number, playerId?: string): Promise<Video[]> {
   const games = await fetchGames()
 
   // Filter to allowlisted games only
@@ -225,7 +225,17 @@ export async function buildPlaylist(totalToFetch: number): Promise<Video[]> {
     })
   )
 
-  const activePools = pools.filter((p) => p.matches.length > 0)
+  // If a specific player is authenticated, filter pools to only their matches
+  const filteredPools = playerId
+    ? pools.map((p) => ({
+        ...p,
+        matches: p.matches.filter((m) =>
+          [...m.Team1Players, ...m.Team2Players].some((mp) => mp.Id === playerId)
+        ),
+      }))
+    : pools
+
+  const activePools = filteredPools.filter((p) => p.matches.length > 0)
 
   if (activePools.length === 0) return []
 

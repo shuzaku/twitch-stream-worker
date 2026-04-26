@@ -21,6 +21,14 @@ interface Props {
 }
 
 type View = 'home' | 'settings'
+type ElectronCSSProperties = React.CSSProperties & {
+  WebkitAppRegion?: 'drag' | 'no-drag'
+}
+
+function isAdmin(auth: AuthUser): boolean {
+  const accountType = auth.accountType?.trim().toLowerCase()
+  return accountType === 'admin' || accountType === 'administrator'
+}
 
 export default function Dashboard({ auth, onLogout }: Props) {
   const [view, setView] = useState<View>('home')
@@ -33,6 +41,8 @@ export default function Dashboard({ auth, onLogout }: Props) {
   })
   const [starting, setStarting] = useState(false)
   const [stopping, setStopping] = useState(false)
+  const [startError, setStartError] = useState('')
+  const admin = isAdmin(auth)
 
   // Load initial status and subscribe to live updates
   useEffect(() => {
@@ -41,14 +51,26 @@ export default function Dashboard({ auth, onLogout }: Props) {
     const unsub = window.api.onStatusUpdate((s) => {
       setStatus(s as WorkerStatus)
     })
-    return unsub
+    return () => { unsub() }
   }, [])
 
   const handleStart = useCallback(async () => {
+    setStartError('')
+    if (!admin) {
+      setStartError('Only FightersEdge admin accounts can start AutoStream.')
+      return
+    }
+
     setStarting(true)
-    await window.api.startStream()
-    setStarting(false)
-  }, [])
+    try {
+      const result = await window.api.startStream() as { ok: boolean; error?: string }
+      if (!result.ok) {
+        setStartError(result.error || 'Unable to start AutoStream.')
+      }
+    } finally {
+      setStarting(false)
+    }
+  }, [admin])
 
   const handleStop = useCallback(async () => {
     setStopping(true)
@@ -82,9 +104,7 @@ export default function Dashboard({ auth, onLogout }: Props) {
           <div style={styles.userInfo}>
             <div style={styles.userName}>{auth.displayName}</div>
             <div style={styles.userSub}>
-              {auth.linkedPlayerName
-                ? `Player: ${auth.linkedPlayerName}`
-                : 'No linked player — showing all matches'}
+              {admin ? 'Admin account - all eligible matches' : 'Admin access required'}
             </div>
           </div>
         </div>
@@ -114,6 +134,9 @@ export default function Dashboard({ auth, onLogout }: Props) {
             >
               {starting ? 'Starting...' : '▶ Start Stream'}
             </button>
+          )}
+          {startError && (
+            <div style={styles.errorNotice}>{startError}</div>
           )}
         </div>
 
@@ -163,10 +186,10 @@ export default function Dashboard({ auth, onLogout }: Props) {
           )}
         </div>
 
-        {/* Player filter notice */}
-        {auth.linkedPlayerName && (
+        {/* Playlist access notice */}
+        {admin && (
           <div style={styles.filterNotice}>
-            Showing matches featuring <strong>{auth.linkedPlayerName}</strong>
+            Playlist uses all eligible recent matches.
           </div>
         )}
       </div>
@@ -239,7 +262,7 @@ function SettingsView({ onBack, auth, onLogout }: { onBack: () => void; auth: Au
             <div>
               <div style={{ fontWeight: 600 }}>{auth.displayName}</div>
               <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                {auth.linkedPlayerName || 'No linked player'}
+                {isAdmin(auth) ? 'Admin' : 'Not admin'}
               </div>
             </div>
           </div>
@@ -343,7 +366,7 @@ function Field({
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 
-const styles: Record<string, React.CSSProperties> = {
+const styles: Record<string, ElectronCSSProperties> = {
   root: {
     height: '100%',
     display: 'flex',
@@ -356,14 +379,14 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: 'space-between',
     padding: '12px 16px',
     borderBottom: '1px solid var(--border)',
-    WebkitAppRegion: 'drag' as unknown as undefined,
+    WebkitAppRegion: 'drag',
     flexShrink: 0,
   },
   titleBarInner: {
     display: 'flex',
     alignItems: 'center',
     gap: '8px',
-    WebkitAppRegion: 'drag' as unknown as undefined,
+    WebkitAppRegion: 'drag',
   },
   titleBarText: {
     fontSize: '13px',
@@ -374,7 +397,7 @@ const styles: Record<string, React.CSSProperties> = {
   titleBarButtons: {
     display: 'flex',
     gap: '4px',
-    WebkitAppRegion: 'no-drag' as unknown as undefined,
+    WebkitAppRegion: 'no-drag',
   },
   titleBarBtn: {
     width: '28px',
@@ -398,7 +421,7 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
     padding: '4px 8px',
     width: 60,
-    WebkitAppRegion: 'no-drag' as unknown as undefined,
+    WebkitAppRegion: 'no-drag',
   },
   body: {
     flex: 1,
@@ -578,6 +601,14 @@ const styles: Record<string, React.CSSProperties> = {
     background: 'var(--accent-dim)',
     borderRadius: 'var(--radius-sm)',
     border: '1px solid rgba(62,180,137,0.3)',
+  },
+  errorNotice: {
+    fontSize: '12px',
+    color: 'var(--red)',
+    padding: '8px 12px',
+    background: 'var(--red-dim)',
+    borderRadius: 'var(--radius-sm)',
+    border: '1px solid var(--red)',
   },
   // Settings view
   settingsSection: {

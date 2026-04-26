@@ -6,6 +6,7 @@ import OBSWizard from './pages/OBSWizard'
 export interface AuthUser {
   deviceToken: string
   accountId: string
+  accountType: string
   displayName: string
   email: string
   avatarUrl: string

@@ -23,6 +23,7 @@ const ElectronStore = require('electron-store').default as typeof import('electr
 export interface AuthUser {
   deviceToken: string
   accountId: string
+  accountType: string
   displayName: string
   email: string
   avatarUrl: string
@@ -65,7 +66,7 @@ const PLAYER_URL  = `http://localhost:${PLAYER_PORT}/player`
 // FightersEdge web app (where the user gives consent) and API (where we
 // exchange the device token for session info).
 const FE_WEB_BASE = process.env.FE_WEB_BASE || 'https://www.fighters-edge.com'
-const FE_API_BASE = process.env.API_BASE_URL || 'https://fightme-server.herokuapp.com'
+const FE_API_BASE = process.env.API_BASE_URL || 'https://fightmeserver.fly.dev'
 const DEVICE_CALLBACK_PORT = 7777
 const DEVICE_CALLBACK_URI  = `http://localhost:${DEVICE_CALLBACK_PORT}/callback`
 
@@ -165,8 +166,21 @@ function destroyPlayerWindow() {
 let workerModule: typeof import('../src/index') | null = null
 let workerRunning = false
 
+function isAdminAuth(auth: AuthUser | null | undefined): boolean {
+  const accountType = auth?.accountType?.trim().toLowerCase()
+  return accountType === 'admin' || accountType === 'administrator'
+}
+
 async function startWorkerProcess() {
   if (workerRunning) return
+
+  const auth = store.get('auth')
+  if (!auth) {
+    throw new Error('Log in with a FightersEdge admin account to start AutoStream.')
+  }
+  if (!isAdminAuth(auth)) {
+    throw new Error('Only FightersEdge admin accounts can start AutoStream.')
+  }
 
   // Lazy-load the worker module
   if (!workerModule) {
@@ -177,7 +191,6 @@ async function startWorkerProcess() {
     mainWindow?.webContents.send('worker:statusUpdate', status)
   })
 
-  const auth = store.get('auth')
   const obsUrl = store.get('obsUrl') as string
   const obsPassword = store.get('obsPassword') as string
   const twitchChannel = store.get('twitchChannel') as string
@@ -188,7 +201,6 @@ async function startWorkerProcess() {
 
   workerRunning = true
   workerModule.startWorker({
-    playerId: auth?.linkedPlayerId || undefined,
     obsUrl,
     obsPassword,
     twitchChannel,
@@ -317,6 +329,7 @@ async function doFightersEdgeLogin(): Promise<AuthUser> {
   const auth: AuthUser = {
     deviceToken: result.token,
     accountId: me.account.id,
+    accountType: me.account.accountType || '',
     displayName: me.account.displayName || me.account.email || 'FightersEdge User',
     email: me.account.email || '',
     avatarUrl: '',  // FE doesn't currently serve an avatar — Dashboard falls back gracefully

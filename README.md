@@ -38,7 +38,7 @@ Copy `.env` and fill in your values:
 ```
 TWITCH_STREAM_KEY=your_stream_key_here
 TWITCH_RTMP_URL=rtmp://live.twitch.tv/app
-API_BASE_URL=https://fightme-server.herokuapp.com
+API_BASE_URL=https://fightmeserver.fly.dev
 OVERLAY_PORT=3001
 QUEUE_SIZE=10
 ```

@@ -1,16 +1,18 @@
 import axios from 'axios'
+import { Config } from './config'
 
-const BASE_URL = process.env.API_BASE_URL || 'https://fightme-server.herokuapp.com'
-const SITE_URL = process.env.SITE_URL || 'https://www.fighters-edge.com'
+const BASE_URL = Config.FE_API_BASE
+const SITE_URL = Config.FE_WEB_BASE
 
-// How many recent matches per game to fetch into the pool each batch.
-// The matchesGame endpoint returns 5 per page; RECENCY_POOL is rounded up to
-// the nearest multiple of 5 when fetching.
-const RECENCY_POOL = parseInt(process.env.RECENCY_POOL || '20', 10)
+// Tuning values resolve at module load time. Config getters resolve env vars
+// in dev and baked-in defaults in production — see src/config.ts.
+const RECENCY_POOL = Config.RECENCY_POOL
+const RECENCY_DAYS = Config.RECENCY_DAYS
 
-// Optional allowlist of game IDs (comma-separated). Empty = all games.
-const ALLOWED_GAME_IDS: Set<string> | null = process.env.GAME_IDS
-  ? new Set(process.env.GAME_IDS.split(',').map((s) => s.trim()).filter(Boolean))
+// Allowlist of game IDs the worker should pull matches from. Empty array
+// means "all games". Production ships a curated list — see src/config.ts.
+const ALLOWED_GAME_IDS: Set<string> | null = Config.GAME_IDS.length > 0
+  ? new Set(Config.GAME_IDS)
   : null
 
 // ── Public interfaces ─────────────────────────────────────────────────────────
@@ -221,7 +223,20 @@ export async function buildPlaylist(totalToFetch: number, playerId?: string): Pr
       // Advance the offset for next batch so we don't repeat the same videos
       gameSkipOffset.set(game.id, skip + RECENCY_POOL)
 
-      return { game, matches: shuffle(matches) }
+      // Drop matches older than RECENCY_DAYS. MongoDB ObjectIds embed a
+      // creation timestamp in their first 4 bytes, so we can filter purely
+      // client-side without a backend change.
+      const cutoff = RECENCY_DAYS > 0
+        ? Date.now() - RECENCY_DAYS * 24 * 60 * 60 * 1000
+        : 0
+      const fresh = cutoff > 0
+        ? matches.filter((m) => {
+            const ts = parseInt(m._id.toString().substring(0, 8), 16) * 1000
+            return ts >= cutoff
+          })
+        : matches
+
+      return { game, matches: shuffle(fresh) }
     })
   )
 

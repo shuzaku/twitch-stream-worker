@@ -19,10 +19,18 @@
   --radius-sm:  6px;
 }
 
-html, body, #root {
+html, body {
   height: 100%;
   width: 100%;
-  overflow: hidden;
+  overflow: hidden; /* prevent the outer page from scrolling */
+}
+
+#root {
+  height: 100%;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden; /* scroll happens inside each view's body panel, not here */
 }
 
 body {
@@ -53,6 +61,9 @@ a {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--border);
+  background: rgba(255,255,255,0.22);
   border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255,255,255,0.35);
 }

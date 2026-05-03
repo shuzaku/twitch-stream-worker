@@ -1,30 +1,35 @@
 import tmi from 'tmi.js'
 import { Video } from './api'
 
-const CHANNEL  = process.env.TWITCH_CHANNEL       || ''
-const USERNAME = process.env.TWITCH_BOT_USERNAME   || ''
-const TOKEN    = process.env.TWITCH_BOT_TOKEN      || '' // OAuth token: oauth:xxxxxxxx
-
 export class TwitchBot {
   private client: tmi.Client | null = null
   private connected = false
+  private readonly channel: string
+  private readonly username: string
+  private readonly token: string
+
+  constructor(channel?: string, username?: string, token?: string) {
+    this.channel  = channel  ?? process.env.TWITCH_CHANNEL       ?? ''
+    this.username = username ?? process.env.TWITCH_BOT_USERNAME  ?? ''
+    this.token    = token    ?? process.env.TWITCH_BOT_TOKEN     ?? ''
+  }
 
   async connect(): Promise<void> {
-    if (!CHANNEL || !USERNAME || !TOKEN) {
-      console.warn('[bot] TWITCH_CHANNEL, TWITCH_BOT_USERNAME or TWITCH_BOT_TOKEN not set — chat bot disabled')
+    if (!this.channel || !this.username || !this.token) {
+      console.warn('[bot] Channel, username or token not set — chat bot disabled')
       return
     }
 
     this.client = new tmi.Client({
       options: { debug: false },
-      identity: { username: USERNAME, password: TOKEN },
-      channels: [CHANNEL],
+      identity: { username: this.username, password: this.token },
+      channels: [this.channel],
     })
 
     try {
       await this.client.connect()
       this.connected = true
-      console.log(`[bot] Connected to #${CHANNEL}`)
+      console.log(`[bot] Connected to #${this.channel}`)
     } catch (err) {
       console.error('[bot] Failed to connect:', err)
     }
@@ -58,7 +63,7 @@ export class TwitchBot {
     const message = parts.join('  •  ')
 
     try {
-      await this.client.say(CHANNEL, message)
+      await this.client.say(this.channel, message)
     } catch (err) {
       console.error('[bot] Failed to send message:', err)
     }

@@ -23,8 +23,14 @@ export class OBSClient {
       })
     } catch (err) {
       this.connected = false
-      const msg = err instanceof Error ? err.message : String(err)
-      console.warn(`[obs] Could not connect to OBS (${msg}) — streaming control disabled`)
+      const raw = err instanceof Error ? err.message : String(err)
+      // Translate low-level codes into readable messages
+      const friendly = raw.includes('4009') || raw.toLowerCase().includes('auth')
+        ? `OBS authentication failed — check your WebSocket password`
+        : raw.includes('ECONNREFUSED') || raw.includes('ENOTFOUND')
+        ? `Cannot reach OBS at ${this.url} — is OBS open with WebSocket enabled?`
+        : `OBS connection failed: ${raw}`
+      throw new Error(friendly)
     }
   }
 

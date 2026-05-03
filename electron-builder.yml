@@ -12,7 +12,9 @@ files:
   - src/overlay/**
   - node_modules/**
   - package.json
-  - .env
+
+# Note: .env is intentionally NOT bundled. Production constants are baked
+# into the build via src/config.ts. End users do not need a .env file.
 
 win:
   target:
@@ -20,6 +22,9 @@ win:
       arch:
         - x64
   icon: build/icon.ico
+  # Signing is handled post-build by `npm run sign:output` (calls signtool
+  # directly, bypassing the winCodeSign download that requires Developer Mode).
+  signAndEditExecutable: false
 
 nsis:
   oneClick: false

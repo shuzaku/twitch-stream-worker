@@ -9,6 +9,7 @@ export interface AuthUser {
   displayName: string
   email: string
   avatarUrl: string
+  accountType: string
   linkedPlayerId: string
   linkedPlayerName: string
   linkedPlayerSlug: string

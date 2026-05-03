@@ -3,8 +3,9 @@ import { buildPlaylist, Video } from './api'
 import { startPlayerServer, playVideo, waitForBrowser, stopPlayerServer } from './player-server'
 import { OBSClient } from './obs-client'
 import { TwitchBot } from './twitch-bot'
+import { Config } from './config'
 
-const QUEUE_SIZE             = parseInt(process.env.QUEUE_SIZE || '10', 10)
+const QUEUE_SIZE             = Config.QUEUE_SIZE
 const RETRY_DELAY_MS         = 5000
 const MAX_CONSECUTIVE_ERRORS = 5
 
@@ -21,6 +22,7 @@ export interface WorkerStatus {
   botConnected: boolean
   currentVideo: Video | null
   queueSize: number
+  error?: string
 }
 
 // Current status — read by Electron main via IPC
@@ -64,97 +66,106 @@ export async function startWorker(options?: {
 
   running = true
   stopRequested = false
-
-  // Override env vars from options if provided (Electron passes these from electron-store)
-  if (options?.obsUrl)          process.env.OBS_WS_URL       = options.obsUrl
-  if (options?.obsPassword)     process.env.OBS_WS_PASSWORD  = options.obsPassword
-  if (options?.twitchChannel)   process.env.TWITCH_CHANNEL   = options.twitchChannel
-  if (options?.twitchBotUsername) process.env.TWITCH_BOT_USERNAME = options.twitchBotUsername
-  if (options?.twitchBotToken)  process.env.TWITCH_BOT_TOKEN = options.twitchBotToken
+  updateStatus({ error: undefined })
 
   console.log('[worker] FightersEdge Twitch Stream Worker starting...')
 
-  await startPlayerServer()
+  try {
+    await startPlayerServer()
 
-  obs = new OBSClient()
-  bot = new TwitchBot()
+    // Pass credentials directly — avoids the module-load-time env snapshot
+    // problem where TwitchBot/OBSClient would capture empty strings before
+    // Electron had a chance to set anything.
+    obs = new OBSClient(options?.obsUrl, options?.obsPassword)
+    bot = new TwitchBot(options?.twitchChannel, options?.twitchBotUsername, options?.twitchBotToken)
 
-  let initialPlaylist: Video[] = []
+    let initialPlaylist: Video[] = []
 
-  await Promise.all([
-    buildPlaylist(QUEUE_SIZE, options?.playerId)
-      .then((videos) => { initialPlaylist = videos })
-      .catch((err) => console.error('[worker] Failed to pre-fetch playlist:', err)),
-    obs.connect().then(async () => {
-      await obs!.startStream()
-      updateStatus({ obsConnected: true })
-    }),
-    bot.connect().then(() => {
-      updateStatus({ botConnected: true })
-    }),
-    waitForBrowser().then(() => console.log('[worker] Browser ready')),
-  ])
+    await Promise.all([
+      buildPlaylist(QUEUE_SIZE, options?.playerId)
+        .then((videos) => { initialPlaylist = videos })
+        .catch((err) => console.error('[worker] Failed to pre-fetch playlist:', err)),
+      obs.connect()
+        .then(async () => {
+          await obs!.startStream()
+          updateStatus({ obsConnected: true })
+        })
+        .catch((err: Error) => {
+          const msg = err.message
+          console.error(`[worker] OBS: ${msg}`)
+          updateStatus({ error: msg })
+          throw err
+        }),
+      bot.connect().then(() => {
+        updateStatus({ botConnected: true })
+      }),
+      waitForBrowser().then(() => console.log('[worker] Browser ready')),
+    ])
 
-  updateStatus({ running: true, queueSize: initialPlaylist.length })
-  console.log('[worker] All systems ready — starting playback')
+    updateStatus({ running: true, queueSize: initialPlaylist.length })
+    console.log('[worker] All systems ready — starting playback')
 
-  // ── Infinite playlist loop ──────────────────────────────────────────────────
-  let playlist = initialPlaylist
-  let playlistIndex = 0
-  let consecutiveErrors = 0
+    // ── Infinite playlist loop ──────────────────────────────────────────────────
+    let playlist = initialPlaylist
+    let playlistIndex = 0
+    let consecutiveErrors = 0
 
-  while (!stopRequested) {
-    if (playlistIndex >= playlist.length) {
-      console.log('[worker] Fetching new playlist batch...')
-      try {
-        playlist = await buildPlaylist(QUEUE_SIZE, options?.playerId)
-        playlistIndex = 0
-        console.log(`[worker] Loaded ${playlist.length} videos into queue`)
-        updateStatus({ queueSize: playlist.length - playlistIndex })
-      } catch (err) {
-        console.error('[worker] Failed to fetch playlist:', err)
-        await sleep(RETRY_DELAY_MS * 2)
+    while (!stopRequested) {
+      if (playlistIndex >= playlist.length) {
+        console.log('[worker] Fetching new playlist batch...')
+        try {
+          playlist = await buildPlaylist(QUEUE_SIZE, options?.playerId)
+          playlistIndex = 0
+          console.log(`[worker] Loaded ${playlist.length} videos into queue`)
+          updateStatus({ queueSize: playlist.length - playlistIndex })
+        } catch (err) {
+          console.error('[worker] Failed to fetch playlist:', err)
+          await sleep(RETRY_DELAY_MS * 2)
+          continue
+        }
+      }
+
+      if (stopRequested) break
+
+      if (playlist.length === 0) {
+        console.warn('[worker] No videos returned from API. Retrying in 30s...')
+        await sleep(30000)
         continue
       }
-    }
 
-    if (stopRequested) break
+      const video = playlist[playlistIndex++]
+      console.log(`[worker] Now playing: ${video.Title || video.Url}`)
+      updateStatus({ currentVideo: video, queueSize: playlist.length - playlistIndex })
 
-    if (playlist.length === 0) {
-      console.warn('[worker] No videos returned from API. Retrying in 30s...')
-      await sleep(30000)
-      continue
-    }
+      await bot?.announceVideo(video)
 
-    const video = playlist[playlistIndex++]
-    console.log(`[worker] Now playing: ${video.Title || video.Url}`)
-    updateStatus({ currentVideo: video, queueSize: playlist.length - playlistIndex })
-
-    await bot?.announceVideo(video)
-
-    try {
-      await playVideo(video)
-      consecutiveErrors = 0
-      console.log(`[worker] Finished: ${video.Title || video.Url}`)
-    } catch (err) {
-      if (stopRequested) break
-      consecutiveErrors++
-      console.error(
-        `[worker] Playback failed (${consecutiveErrors}/${MAX_CONSECUTIVE_ERRORS}):`,
-        err instanceof Error ? err.message : err
-      )
-
-      if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-        console.error('[worker] Too many consecutive errors — waiting 60s...')
+      try {
+        await playVideo(video)
         consecutiveErrors = 0
-        await sleep(60000)
-      } else {
-        await sleep(RETRY_DELAY_MS)
+        console.log(`[worker] Finished: ${video.Title || video.Url}`)
+      } catch (err) {
+        if (stopRequested) break
+        consecutiveErrors++
+        console.error(
+          `[worker] Playback failed (${consecutiveErrors}/${MAX_CONSECUTIVE_ERRORS}):`,
+          err instanceof Error ? err.message : err
+        )
+
+        if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+          console.error('[worker] Too many consecutive errors — waiting 60s...')
+          consecutiveErrors = 0
+          await sleep(60000)
+        } else {
+          await sleep(RETRY_DELAY_MS)
+        }
       }
     }
+  } catch (err) {
+    console.error('[worker] Startup failed:', err instanceof Error ? err.message : err)
+    throw err
+  } finally {
+    await _shutdown()
   }
-
-  await _shutdown()
 }
 
 export async function stopWorker(): Promise<void> {
@@ -195,9 +206,12 @@ function sleep(ms: number): Promise<void> {
 // Only auto-run when this file is executed directly (not imported by Electron)
 
 if (require.main === module) {
-  // In CLI mode, spawn Chrome ourselves since Electron isn't managing it
+  // CLI mode is dev-only — honour env overrides in Config.
+  const { setDevMode } = require('./config') as typeof import('./config')
+  setDevMode(true)
+
   const { spawn } = require('child_process')
-  const PLAYER_PORT = process.env.PLAYER_PORT || process.env.OVERLAY_PORT || '3001'
+  const PLAYER_PORT = Config.PLAYER_PORT
   const CHROME_PATH = process.env.CHROME_PATH || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
 
   const playerUrl = `http://localhost:${PLAYER_PORT}/player`

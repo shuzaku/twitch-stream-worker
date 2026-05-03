@@ -228,6 +228,7 @@
     let ws = null
     let ytReady = false
     let pendingVideoId = null
+    let currentVolume = 80  // mirrors the app default; overwritten by setVolume messages
 
     // ── YouTube IFrame API ────────────────────────────────────────────────
 
@@ -263,10 +264,19 @@
       }
     }
 
+    function applyVolume() {
+      if (!player || !ytReady) return
+      if (currentVolume === 0) {
+        player.mute()
+      } else {
+        player.unMute()
+        player.setVolume(currentVolume)
+      }
+    }
+
     function onPlayerStateChange(event) {
       if (event.data === YT.PlayerState.PLAYING) {
-        player.unMute()
-        player.setVolume(100)
+        applyVolume()
       } else if (event.data === YT.PlayerState.CUED) {
         player.playVideo()
       } else if (event.data === YT.PlayerState.ENDED) {
@@ -328,6 +338,9 @@
         if (msg.type === 'play') {
           updateOverlay(msg)
           loadVideo(msg.videoId)
+        } else if (msg.type === 'setVolume') {
+          currentVolume = msg.volume
+          applyVolume()
         }
       })
 

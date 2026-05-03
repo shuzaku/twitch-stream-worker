@@ -26,8 +26,18 @@ const api = {
   saveSettings: (settings: Record<string, unknown>) =>
     ipcRenderer.invoke('settings:save', settings),
 
-  // ── Player URL ─────────────────────────────────────────────────────────────
+  // ── Twitch chat bot (optional, separate from FE identity) ─────────────────
+  connectTwitchBot: () => ipcRenderer.invoke('bot:connectTwitch'),
+  disconnectTwitchBot: () => ipcRenderer.invoke('bot:disconnectTwitch'),
+
+  // ── Player URL + volume ────────────────────────────────────────────────────
   getPlayerUrl: () => ipcRenderer.invoke('player:getUrl'),
+  getPlayerVolume: () => ipcRenderer.invoke('player:getVolume'),
+  setPlayerVolume: (volume: number) => ipcRenderer.invoke('player:setVolume', volume),
+
+  // ── Window controls ────────────────────────────────────────────────────────
+  minimizeWindow: () => ipcRenderer.send('window:minimize'),
+  closeWindow:    () => ipcRenderer.send('window:close'),
 
   // ── Events from main → renderer ────────────────────────────────────────────
   onStatusUpdate: (cb: (status: unknown) => void) => {

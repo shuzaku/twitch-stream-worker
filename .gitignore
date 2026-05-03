@@ -1,4 +1,9 @@
 node_modules/
 dist/
+dist-electron/
+dist-renderer/
+release/
 .env
 *.log
+build/cert.pfx
+nul

@@ -78,13 +78,13 @@
       bottom: 0;
       left: 0;
       right: 0;
-      height: 64px;
+      height: 48px;
       background: linear-gradient(90deg, rgba(28,28,36,0.97) 0%, rgba(36,40,50,0.93) 100%);
       border-top: 2px solid #3eb489;
       display: flex;
       align-items: center;
-      padding: 0 20px;
-      gap: 14px;
+      padding: 0 15px;
+      gap: 11px;
       pointer-events: none;
     }
 
@@ -92,18 +92,18 @@
     #bar-logo {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
       flex-shrink: 0;
     }
 
     #bar-logo img {
-      width: 28px;
-      height: 28px;
+      width: 21px;
+      height: 21px;
       object-fit: contain;
     }
 
     #bar-logo-text {
-      font-size: 15px;
+      font-size: 11px;
       font-weight: 800;
       color: #3eb489;
       letter-spacing: 0.5px;
@@ -112,13 +112,13 @@
 
     #divider {
       width: 1px;
-      height: 34px;
+      height: 26px;
       background: rgba(255,255,255,0.15);
       flex-shrink: 0;
     }
 
     #now-playing-label {
-      font-size: 10px;
+      font-size: 8px;
       font-weight: 700;
       color: #3eb489;
       text-transform: uppercase;
@@ -128,7 +128,7 @@
     }
 
     #video-title {
-      font-size: 15px;
+      font-size: 12px;
       font-weight: 500;
       color: #fff;
       white-space: nowrap;
@@ -139,7 +139,7 @@
     }
 
     #matchup {
-      font-size: 13px;
+      font-size: 10px;
       font-weight: 500;
       color: rgba(255,255,255,0.7);
       white-space: nowrap;
@@ -149,10 +149,10 @@
     #game-tag {
       background: linear-gradient(135deg, #3eb489 0%, #2d8a6a 100%);
       color: #fff;
-      font-size: 10px;
+      font-size: 8px;
       font-weight: 700;
-      padding: 5px 11px;
-      border-radius: 4px;
+      padding: 4px 8px;
+      border-radius: 3px;
       text-transform: uppercase;
       letter-spacing: 1px;
       white-space: nowrap;
@@ -217,6 +217,7 @@
     <span id="video-title">Loading...</span>
     <span id="matchup"></span>
     <span id="game-tag"></span>
+    <span id="timecode" style="font-size:11px;color:rgba(255,255,255,0.45);white-space:nowrap;flex-shrink:0;font-variant-numeric:tabular-nums;letter-spacing:0.03em;"></span>
   </div>
 
   <!-- YouTube IFrame API -->
@@ -229,6 +230,7 @@
     let ytReady = false
     let pendingVideoId = null
     let currentVolume = 80  // mirrors the app default; overwritten by setVolume messages
+    let timecodeInterval = null
 
     // ── YouTube IFrame API ────────────────────────────────────────────────
 
@@ -259,8 +261,10 @@
     function onPlayerReady() {
       send({ type: 'ready' })
       if (pendingVideoId) {
-        player.loadVideoById(pendingVideoId)
-        pendingVideoId = null
+        loadVideo(pendingVideoId, pendingClipStart, pendingClipEnd)
+        pendingVideoId   = null
+        pendingClipStart = null
+        pendingClipEnd   = null
       }
     }
 
@@ -277,24 +281,79 @@
     function onPlayerStateChange(event) {
       if (event.data === YT.PlayerState.PLAYING) {
         applyVolume()
+        startTimecode()
+      } else if (event.data === YT.PlayerState.PAUSED || event.data === YT.PlayerState.ENDED) {
+        stopTimecode()
+        if (event.data === YT.PlayerState.ENDED) {
+          send({ type: 'ended' })
+        }
       } else if (event.data === YT.PlayerState.CUED) {
         player.playVideo()
-      } else if (event.data === YT.PlayerState.ENDED) {
-        send({ type: 'ended' })
       }
+    }
+
+    function startTimecode() {
+      stopTimecode()
+      timecodeInterval = setInterval(() => {
+        if (!player || !ytReady) return
+        const rawTime    = Math.floor(player.getCurrentTime() || 0)
+        const rawDur     = Math.floor(player.getDuration()    || 0)
+        // When a clip is active, report time relative to clipStart
+        const clipStart  = activeClipStart ?? 0
+        const clipEnd    = activeClipEnd   ?? rawDur
+        const currentTime = Math.max(0, rawTime - clipStart)
+        const duration    = Math.max(0, clipEnd - clipStart)
+        send({ type: 'timeUpdate', currentTime, duration })
+        updateTimecodeBar(currentTime, duration)
+      }, 1000)
+    }
+
+    function stopTimecode() {
+      if (timecodeInterval) {
+        clearInterval(timecodeInterval)
+        timecodeInterval = null
+      }
+    }
+
+    function formatTime(seconds) {
+      const m = Math.floor(seconds / 60)
+      const s = seconds % 60
+      return `${m}:${String(s).padStart(2, '0')}`
+    }
+
+    function updateTimecodeBar(currentTime, duration) {
+      const el = document.getElementById('timecode')
+      if (el) el.textContent = duration > 0 ? `${formatTime(currentTime)} / ${formatTime(duration)}` : ''
     }
 
     function onPlayerError(event) {
       send({ type: 'error', code: event.data })
     }
 
-    function loadVideo(videoId) {
+    let pendingClipStart = null
+    let pendingClipEnd   = null
+    let activeClipStart  = null
+    let activeClipEnd    = null
+
+    function loadVideo(videoId, clipStart, clipEnd) {
       document.getElementById('waiting').style.display = 'none'
+      activeClipStart = (clipStart != null) ? clipStart : null
+      activeClipEnd   = (clipEnd   != null) ? clipEnd   : null
       if (!player || !ytReady) {
-        pendingVideoId = videoId
+        pendingVideoId   = videoId
+        pendingClipStart = activeClipStart
+        pendingClipEnd   = activeClipEnd
         return
       }
-      player.loadVideoById(videoId)
+      if (activeClipStart != null || activeClipEnd != null) {
+        player.loadVideoById({
+          videoId,
+          startSeconds: activeClipStart ?? 0,
+          ...(activeClipEnd != null && { endSeconds: activeClipEnd }),
+        })
+      } else {
+        player.loadVideoById(videoId)
+      }
     }
 
     // ── Overlay update ────────────────────────────────────────────────────
@@ -337,7 +396,10 @@
         try { msg = JSON.parse(event.data) } catch { return }
         if (msg.type === 'play') {
           updateOverlay(msg)
-          loadVideo(msg.videoId)
+          loadVideo(msg.videoId, msg.clipStart, msg.clipEnd)
+        } else if (msg.type === 'skip') {
+          stopTimecode()
+          if (player && ytReady) player.stopVideo()
         } else if (msg.type === 'setVolume') {
           currentVolume = msg.volume
           applyVolume()

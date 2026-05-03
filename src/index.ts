@@ -1,5 +1,5 @@
 import 'dotenv/config'
-import { buildPlaylist, Video } from './api'
+import { buildPlaylist, MatchTypes, Video } from './api'
 import { startPlayerServer, playVideo, waitForBrowser, stopPlayerServer } from './player-server'
 import { OBSClient } from './obs-client'
 import { TwitchBot } from './twitch-bot'
@@ -52,7 +52,8 @@ function updateStatus(patch: Partial<WorkerStatus>) {
 // ── Start / Stop ──────────────────────────────────────────────────────────────
 
 export async function startWorker(options?: {
-  playerId?: string
+  playerIds?: string[]
+  matchTypes?: MatchTypes
   obsUrl?: string
   obsPassword?: string
   twitchChannel?: string
@@ -82,7 +83,7 @@ export async function startWorker(options?: {
     let initialPlaylist: Video[] = []
 
     await Promise.all([
-      buildPlaylist(QUEUE_SIZE, options?.playerId)
+      buildPlaylist(QUEUE_SIZE, options?.playerIds, options?.matchTypes)
         .then((videos) => { initialPlaylist = videos })
         .catch((err) => console.error('[worker] Failed to pre-fetch playlist:', err)),
       obs.connect()
@@ -114,7 +115,7 @@ export async function startWorker(options?: {
       if (playlistIndex >= playlist.length) {
         console.log('[worker] Fetching new playlist batch...')
         try {
-          playlist = await buildPlaylist(QUEUE_SIZE, options?.playerId)
+          playlist = await buildPlaylist(QUEUE_SIZE, options?.playerIds, options?.matchTypes)
           playlistIndex = 0
           console.log(`[worker] Loaded ${playlist.length} videos into queue`)
           updateStatus({ queueSize: playlist.length - playlistIndex })

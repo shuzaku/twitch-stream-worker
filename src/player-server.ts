@@ -40,6 +40,11 @@ app.get('/api/now-playing', (_req, res) => {
 
 let currentVideo: Video | null = null
 let targetVolume = 80  // kept in sync via setVolume(); pushed to each client on ready
+let onTimeUpdate: ((currentTime: number, duration: number) => void) | null = null
+
+export function setTimeUpdateCallback(cb: (currentTime: number, duration: number) => void) {
+  onTimeUpdate = cb
+}
 
 // Pending playback promise — resolved/rejected when the browser reports ended/error
 let pendingResolve: (() => void) | null = null
@@ -72,11 +77,12 @@ wss.on('connection', (ws) => {
 
     if (msg.type === 'ready') {
       console.log('[player] YouTube player ready')
-      // Push the saved volume immediately so the first video inherits it
       ws.send(JSON.stringify({ type: 'setVolume', volume: targetVolume }))
-      // Resolve on first ready signal; subsequent ones (from extra clients) are no-ops
       browserReadyResolve?.()
       browserReadyResolve = null
+    } else if ((msg as any).type === 'timeUpdate') {
+      const { currentTime, duration } = msg as any
+      onTimeUpdate?.(currentTime, duration)
     } else if (msg.type === 'ended') {
       console.log(`[player] Video ended: ${currentVideo?.Url}`)
       // Only the first 'ended' signal matters — clear handlers so duplicates are ignored
@@ -108,11 +114,24 @@ wss.on('connection', (ws) => {
 
 export function setVolume(volume: number): void {
   const clamped = Math.max(0, Math.min(100, Math.round(volume)))
-  targetVolume = clamped  // persist so new clients get the right value on ready
+  targetVolume = clamped
   const msg = JSON.stringify({ type: 'setVolume', volume: clamped })
   wss.clients.forEach((client) => {
     if (client.readyState === WebSocket.OPEN) client.send(msg)
   })
+}
+
+export function skipVideo(): void {
+  // Tell the browser to stop immediately
+  const msg = JSON.stringify({ type: 'skip' })
+  wss.clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) client.send(msg)
+  })
+  // Resolve the pending playback promise so the worker loop advances
+  const resolve = pendingResolve
+  pendingResolve = null
+  pendingReject = null
+  resolve?.()
 }
 
 export function playVideo(video: Video): Promise<void> {
@@ -138,6 +157,8 @@ export function playVideo(video: Video): Promise<void> {
       game: video.Game || null,
       player1: video.players?.[0]?.name || null,
       player2: video.players?.[1]?.name || null,
+      clipStart: video.clipStart ?? null,
+      clipEnd:   video.clipEnd   ?? null,
     })
 
     // Broadcast to every connected client — Electron window + OBS browser source

@@ -70,7 +70,7 @@ const PROD_GAME_IDS: string[] = [
 ]
 const PROD_RECENCY_POOL = 20    // Per-game pool size to randomly sample from
 const PROD_RECENCY_DAYS = 30    // Drop matches older than this (0 = disabled)
-const PROD_QUEUE_SIZE   = 1    // How many videos to pre-fetch into the queue
+const PROD_QUEUE_SIZE   = 10    // How many videos to pre-fetch into the queue
 
 // Internal — local HTTP servers. No reason these would ever need to vary.
 const PROD_PLAYER_PORT             = 3001

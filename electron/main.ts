@@ -38,6 +38,7 @@ export interface AuthUser {
   linkedPlayerName: string
   linkedPlayerSlug: string
   linkedPlayerImageUrl: string
+  linkedPlayers: { id: string; name: string; slug: string; imageUrl: string }[]
 }
 
 interface StoreSchema {
@@ -49,6 +50,8 @@ interface StoreSchema {
   twitchBotToken: string
   twitchBotEnabled: boolean
   obsSetupDone: boolean
+  matchTypeOnline: boolean
+  matchTypeTournament: boolean
 }
 
 const store = new ElectronStore<StoreSchema>({
@@ -61,6 +64,8 @@ const store = new ElectronStore<StoreSchema>({
     twitchBotToken: '',
     twitchBotEnabled: false,
     obsSetupDone: false,
+    matchTypeOnline: true,
+    matchTypeTournament: true,
   },
 })
 
@@ -125,7 +130,8 @@ function createMainWindow() {
   })
 
   if (isDev) {
-    mainWindow.loadURL('http://localhost:5173')
+    const port = process.env.VITE_PORT || '5173'
+    mainWindow.loadURL(`http://localhost:${port}`)
     // mainWindow.webContents.openDevTools()
   } else {
     mainWindow.loadFile(path.join(__dirname, '../../dist-renderer/index.html'))
@@ -169,18 +175,45 @@ async function startWorkerProcess() {
   const twitchBotUsername = botEnabled ? store.get('twitchBotUsername') as string : ''
   const twitchBotToken    = botEnabled ? store.get('twitchBotToken')    as string : ''
 
-  const isAdmin = auth?.accountType === 'admin'
+  const accountType = auth?.accountType || ''
+  const isAdmin   = accountType === 'admin'
+  const isPremium = accountType === 'premium'
+
+  // Determine which player IDs to filter by:
+  //   admin   → undefined (all eligible matches)
+  //   premium → all linked player IDs
+  //   other   → should be blocked in the UI, but guard here too
+  let playerIds: string[] | undefined
+  if (isAdmin) {
+    playerIds = undefined
+  } else if (isPremium) {
+    const ids = (auth?.linkedPlayers ?? []).map((p) => p.id)
+    playerIds = ids.length > 0 ? ids : undefined
+  } else {
+    // Fallback for legacy single-linked non-premium accounts
+    playerIds = auth?.linkedPlayerId ? [auth.linkedPlayerId] : undefined
+  }
 
   // Prime the player-server with the saved volume *before* the stream starts.
-  // This ensures the first ready signal from any browser client gets the correct
-  // volume immediately, preventing a loud spike on the first video.
   const savedVolume = (store.get as (key: string, def: number) => number)('playerVolume', 80)
-  const { setVolume } = require('../src/player-server') as typeof import('../src/player-server')
+  const {
+    setVolume,
+    setTimeUpdateCallback,
+  } = require('../src/player-server') as typeof import('../src/player-server')
   setVolume(savedVolume)
+
+  // Forward timecode ticks from the player overlay to the renderer.
+  setTimeUpdateCallback((currentTime: number, duration: number) => {
+    mainWindow?.webContents.send('player:timeUpdate', { currentTime, duration })
+  })
+
+  const matchTypeOnline     = (store.get as (k: string, d: boolean) => boolean)('matchTypeOnline', true)
+  const matchTypeTournament = (store.get as (k: string, d: boolean) => boolean)('matchTypeTournament', true)
 
   workerRunning = true
   workerModule.startWorker({
-    playerId: isAdmin ? undefined : (auth?.linkedPlayerId || undefined),
+    playerIds,
+    matchTypes: { online: matchTypeOnline, tournament: matchTypeTournament },
     obsUrl,
     obsPassword,
     twitchChannel,
@@ -306,6 +339,7 @@ async function doFightersEdgeLogin(): Promise<AuthUser> {
   const me = (await meRes.json()) as {
     account: { id: string; displayName: string; email: string; accountType?: string }
     linkedPlayer: { id: string; name: string; slug: string; imageUrl?: string } | null
+    linkedPlayers: { id: string; name: string; slug: string; imageUrl: string }[]
   }
 
   const auth: AuthUser = {
@@ -319,6 +353,7 @@ async function doFightersEdgeLogin(): Promise<AuthUser> {
     linkedPlayerName:     me.linkedPlayer?.name    || '',
     linkedPlayerSlug:     me.linkedPlayer?.slug    || '',
     linkedPlayerImageUrl: me.linkedPlayer?.imageUrl || '',
+    linkedPlayers:        me.linkedPlayers         || [],
   }
 
   store.set('auth', auth)
@@ -576,6 +611,8 @@ ipcMain.handle('settings:get', () => ({
   twitchBotToken: store.get('twitchBotToken'),
   twitchBotEnabled: store.get('twitchBotEnabled'),
   obsSetupDone: store.get('obsSetupDone'),
+  matchTypeOnline: store.get('matchTypeOnline'),
+  matchTypeTournament: store.get('matchTypeTournament'),
 }))
 
 ipcMain.handle('settings:save', (_event, settings: Partial<StoreSchema>) => {
@@ -585,7 +622,9 @@ ipcMain.handle('settings:save', (_event, settings: Partial<StoreSchema>) => {
   if (settings.twitchBotUsername !== undefined) store.set('twitchBotUsername', settings.twitchBotUsername)
   if (settings.twitchBotToken !== undefined)    store.set('twitchBotToken', settings.twitchBotToken)
   if (settings.twitchBotEnabled !== undefined)  store.set('twitchBotEnabled', settings.twitchBotEnabled)
-  if (settings.obsSetupDone !== undefined)      store.set('obsSetupDone', settings.obsSetupDone)
+  if (settings.obsSetupDone !== undefined)        store.set('obsSetupDone', settings.obsSetupDone)
+  if (settings.matchTypeOnline !== undefined)     store.set('matchTypeOnline', settings.matchTypeOnline)
+  if (settings.matchTypeTournament !== undefined) store.set('matchTypeTournament', settings.matchTypeTournament)
   return { ok: true }
 })
 
@@ -600,6 +639,12 @@ ipcMain.handle('player:setVolume', (_event, volume: number) => {
 
 ipcMain.handle('player:getVolume', () => {
   return (store.get as (key: string, def: number) => number)('playerVolume', 80)
+})
+
+ipcMain.handle('player:skip', () => {
+  const { skipVideo } = require('../src/player-server') as typeof import('../src/player-server')
+  skipVideo()
+  return { ok: true }
 })
 
 // ── Window controls ───────────────────────────────────────────────────────────

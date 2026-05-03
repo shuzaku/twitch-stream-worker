@@ -23,6 +23,12 @@ interface Props {
 
 type View = 'home' | 'settings' | 'obs'
 
+function formatTime(seconds: number): string {
+  const m = Math.floor(seconds / 60)
+  const s = seconds % 60
+  return `${m}:${String(s).padStart(2, '0')}`
+}
+
 export default function Dashboard({ auth, onLogout }: Props) {
   const [view, setView] = useState<View>('home')
   const [status, setStatus] = useState<WorkerStatus>({
@@ -36,10 +42,19 @@ export default function Dashboard({ auth, onLogout }: Props) {
   const [stopping, setStopping] = useState(false)
   const [playerUrl, setPlayerUrl] = useState('http://localhost:3001/player')
   const [volume, setVolumeState] = useState(80)
+  const [timecode, setTimecode] = useState<{ currentTime: number; duration: number } | null>(null)
+  const [matchTypeOnline, setMatchTypeOnline] = useState(true)
+  const [matchTypeTournament, setMatchTypeTournament] = useState(true)
 
   function handleVolumeChange(val: number) {
     setVolumeState(val)
     window.api.setPlayerVolume(val)
+  }
+
+  function handleMatchTypeChange(type: 'online' | 'tournament', val: boolean) {
+    if (type === 'online') setMatchTypeOnline(val)
+    else setMatchTypeTournament(val)
+    window.api.saveSettings({ [type === 'online' ? 'matchTypeOnline' : 'matchTypeTournament']: val })
   }
 
   // Load initial status and subscribe to live updates
@@ -47,11 +62,23 @@ export default function Dashboard({ auth, onLogout }: Props) {
     window.api.getStatus().then((s) => setStatus(s as WorkerStatus))
     window.api.getPlayerUrl().then((u) => setPlayerUrl(u as string))
     window.api.getPlayerVolume().then((v) => setVolumeState(v as number))
-
-    const unsub = window.api.onStatusUpdate((s) => {
-      setStatus(s as WorkerStatus)
+    window.api.getSettings().then((s: any) => {
+      if (s.matchTypeOnline     !== undefined) setMatchTypeOnline(s.matchTypeOnline)
+      if (s.matchTypeTournament !== undefined) setMatchTypeTournament(s.matchTypeTournament)
     })
-    return unsub
+
+    const unsubStatus = window.api.onStatusUpdate((s) => {
+      const ws = s as WorkerStatus
+      setStatus(ws)
+      if (!ws.running || !ws.currentVideo) setTimecode(null)
+    })
+    const unsubTime = window.api.onTimeUpdate?.((currentTime, duration) => {
+      setTimecode({ currentTime, duration })
+    })
+    return () => {
+      unsubStatus()
+      unsubTime?.()
+    }
   }, [])
 
   const handleStart = useCallback(async () => {
@@ -104,9 +131,13 @@ export default function Dashboard({ auth, onLogout }: Props) {
             <div style={styles.userSub}>
               {auth.accountType === 'admin'
                 ? 'Admin account — all eligible matches'
-                : auth.linkedPlayerName
-                  ? `Player: ${auth.linkedPlayerName}`
-                  : 'No linked player'}
+                : auth.accountType === 'premium'
+                  ? (auth.linkedPlayers?.length ?? 0) > 0
+                    ? `Premium — ${auth.linkedPlayers.map((p) => p.name).join(', ')}`
+                    : 'Premium — no players linked'
+                  : auth.linkedPlayerName
+                    ? `Player: ${auth.linkedPlayerName}`
+                    : 'No linked player'}
             </div>
           </div>
         </div>
@@ -120,9 +151,9 @@ export default function Dashboard({ auth, onLogout }: Props) {
             </span>
           </div>
 
-          {auth.accountType !== 'admin' ? (
+          {auth.accountType !== 'admin' && auth.accountType !== 'premium' ? (
             <div style={styles.adminGate}>
-              Only FightersEdge admin accounts can start AutoStream.
+              Only admin or premium accounts can start AutoStream.
             </div>
           ) : status.running ? (
             <button
@@ -150,7 +181,16 @@ export default function Dashboard({ auth, onLogout }: Props) {
         {/* Now playing */}
         {status.running && (
           <div style={styles.nowPlayingCard}>
-            <div style={styles.npLabel}>Now Playing</div>
+            <div style={styles.npHeaderRow}>
+              <div style={styles.npLabel}>Now Playing</div>
+              <button
+                style={styles.skipBtn}
+                onClick={() => { window.api.skipVideo?.(); setTimecode(null) }}
+                title="Skip to next video"
+              >
+                ⏭ Skip
+              </button>
+            </div>
             {status.currentVideo ? (
               <>
                 <div style={styles.npTitle}>
@@ -166,14 +206,21 @@ export default function Dashboard({ auth, onLogout }: Props) {
                     ))}
                   </div>
                 )}
-                <a
-                  href={`https://youtu.be/${status.currentVideo.Url}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  style={styles.ytLink}
-                >
-                  ▶ Watch on YouTube
-                </a>
+                <div style={styles.npFooterRow}>
+                  <a
+                    href={`https://youtu.be/${status.currentVideo.Url}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={styles.ytLink}
+                  >
+                    ▶ Watch on YouTube
+                  </a>
+                  {timecode && timecode.duration > 0 && (
+                    <span style={styles.timecode}>
+                      {formatTime(timecode.currentTime)} / {formatTime(timecode.duration)}
+                    </span>
+                  )}
+                </div>
               </>
             ) : (
               <div style={styles.npLoading}>Loading playlist...</div>
@@ -207,6 +254,40 @@ export default function Dashboard({ auth, onLogout }: Props) {
           <span style={styles.volumeValue}>{volume}%</span>
         </div>
 
+        {/* Match type toggles */}
+        <div style={styles.matchTypeCard}>
+          <div style={styles.matchTypeLabel}>Queue Sources</div>
+          <div style={styles.matchTypeRow}>
+            <label style={styles.matchTypeToggle}>
+              <input
+                type="checkbox"
+                checked={matchTypeOnline}
+                disabled={status.running}
+                onChange={(e) => handleMatchTypeChange('online', e.target.checked)}
+                style={styles.matchTypeCheckbox}
+              />
+              <span style={matchTypeOnline ? styles.matchTypeChipOn : styles.matchTypeChipOff}>
+                Online Matches
+              </span>
+            </label>
+            <label style={styles.matchTypeToggle}>
+              <input
+                type="checkbox"
+                checked={matchTypeTournament}
+                disabled={status.running}
+                onChange={(e) => handleMatchTypeChange('tournament', e.target.checked)}
+                style={styles.matchTypeCheckbox}
+              />
+              <span style={matchTypeTournament ? styles.matchTypeChipOn : styles.matchTypeChipOff}>
+                Tournament Matches
+              </span>
+            </label>
+          </div>
+          {status.running && (
+            <div style={styles.matchTypeHint}>Stop the stream to change sources.</div>
+          )}
+        </div>
+
         {/* OBS Setup link */}
         <button style={styles.obsNavBtn} onClick={() => setView('obs')}>
           <span>OBS Setup</span>
@@ -217,6 +298,12 @@ export default function Dashboard({ auth, onLogout }: Props) {
         {auth.accountType === 'admin' ? (
           <div style={styles.filterNotice}>
             Playlist uses all eligible recent matches.
+          </div>
+        ) : auth.accountType === 'premium' ? (
+          <div style={styles.filterNotice}>
+            {(auth.linkedPlayers?.length ?? 0) > 0
+              ? <>Showing matches for <strong>{auth.linkedPlayers.map((p) => p.name).join(', ')}</strong>.</>
+              : 'No players linked — go to FightersEdge to link your player profiles.'}
           </div>
         ) : auth.linkedPlayerName ? (
           <div style={styles.filterNotice}>
@@ -749,12 +836,28 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: 'column',
     gap: '8px',
   },
+  npHeaderRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   npLabel: {
     fontSize: '11px',
     fontWeight: 700,
     color: 'var(--accent)',
     textTransform: 'uppercase',
     letterSpacing: '0.08em',
+  },
+  skipBtn: {
+    fontSize: '11px',
+    fontWeight: 600,
+    color: 'var(--text-muted)',
+    background: 'transparent',
+    border: '1px solid var(--border)',
+    borderRadius: '4px',
+    padding: '3px 8px',
+    cursor: 'pointer',
+    letterSpacing: '0.03em',
   },
   npTitle: {
     fontSize: '14px',
@@ -765,6 +868,20 @@ const styles: Record<string, React.CSSProperties> = {
   npLoading: {
     fontSize: '13px',
     color: 'var(--text-muted)',
+  },
+  npFooterRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '8px',
+    flexWrap: 'wrap' as const,
+  },
+  timecode: {
+    fontSize: '12px',
+    color: 'var(--text-muted)',
+    fontVariantNumeric: 'tabular-nums',
+    letterSpacing: '0.03em',
+    flexShrink: 0,
   },
   gameTag: {
     display: 'inline-block',
@@ -793,7 +910,6 @@ const styles: Record<string, React.CSSProperties> = {
   ytLink: {
     fontSize: '12px',
     color: 'var(--accent)',
-    marginTop: '2px',
   },
   systemGrid: {
     display: 'flex',
@@ -853,6 +969,63 @@ const styles: Record<string, React.CSSProperties> = {
     lineHeight: 1.4,
   },
   // OBS source card
+  matchTypeCard: {
+    padding: '12px 14px',
+    background: 'var(--bg-panel)',
+    border: '1px solid var(--border)',
+    borderRadius: 'var(--radius)',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+  },
+  matchTypeLabel: {
+    fontSize: '11px',
+    fontWeight: 700,
+    color: 'var(--text-muted)',
+    textTransform: 'uppercase',
+    letterSpacing: '0.08em',
+  },
+  matchTypeRow: {
+    display: 'flex',
+    gap: '8px',
+    flexWrap: 'wrap' as const,
+  },
+  matchTypeToggle: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    cursor: 'pointer',
+  },
+  matchTypeCheckbox: {
+    display: 'none',
+  },
+  matchTypeChipOn: {
+    fontSize: '12px',
+    fontWeight: 600,
+    padding: '4px 10px',
+    borderRadius: '12px',
+    background: 'var(--accent-dim)',
+    border: '1px solid var(--accent)',
+    color: 'var(--accent)',
+    cursor: 'pointer',
+    userSelect: 'none' as const,
+  },
+  matchTypeChipOff: {
+    fontSize: '12px',
+    fontWeight: 600,
+    padding: '4px 10px',
+    borderRadius: '12px',
+    background: 'transparent',
+    border: '1px solid var(--border)',
+    color: 'var(--text-muted)',
+    cursor: 'pointer',
+    userSelect: 'none' as const,
+  },
+  matchTypeHint: {
+    fontSize: '11px',
+    color: 'var(--text-muted)',
+    fontStyle: 'italic',
+  },
   obsNavBtn: {
     width: '100%',
     display: 'flex',

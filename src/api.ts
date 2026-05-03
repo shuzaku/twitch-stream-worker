@@ -39,6 +39,8 @@ export interface Video {
   Game?: string
   Title?: string
   players?: Player[]
+  clipStart?: number   // seconds; only present on tournament matches with timestamps
+  clipEnd?: number     // seconds; only present on tournament matches with timestamps
 }
 
 // ── Raw API shapes ────────────────────────────────────────────────────────────
@@ -62,6 +64,8 @@ interface RawMatch {
   Team1Players: RawMatchPlayer[]
   Team2Players: RawMatchPlayer[]
   Game: RawGame[]   // embedded via $lookup — comes back as array
+  ClipStart?: string
+  ClipEnd?: string
 }
 
 interface MatchesGameResponse {
@@ -127,6 +131,93 @@ async function fetchRecentPoolForGame(gameId: string, poolSize: number): Promise
   return results.flat()
 }
 
+// Fetch matches for a specific player directly from the backend.
+async function fetchMatchesForPlayer(playerId: string, skip: number): Promise<RawMatch[]> {
+  try {
+    const res = await axios.get<MatchesGameResponse>(
+      `${BASE_URL}/matchesPlayer/?queryName=PlayerId&queryValue=${playerId}&skip=${skip}`,
+      { timeout: 8000 }
+    )
+    return res.data?.matches ?? []
+  } catch {
+    return []
+  }
+}
+
+async function fetchRecentPoolForPlayer(playerId: string, poolSize: number): Promise<RawMatch[]> {
+  const pages = Math.ceil(poolSize / 5)
+  const results = await Promise.all(
+    Array.from({ length: pages }, (_, i) => fetchMatchesForPlayer(playerId, i * 5))
+  )
+  return results.flat()
+}
+
+// ── Tournament match fetching ─────────────────────────────────────────────────
+
+// Fetch all tournament matches globally (no game filter) — used for the admin
+// path. Filtering per-game is unreliable because GameIds may differ between
+// the two collections.
+async function fetchTournamentMatches(skip: number): Promise<RawMatch[]> {
+  try {
+    const res = await axios.get<MatchesGameResponse>(
+      `${BASE_URL}/tournament-matches?skip=${skip}`,
+      { timeout: 8000 }
+    )
+    const matches = res.data?.matches ?? []
+    if (skip === 0) console.log(`[api] Tournament matches page 0: ${matches.length} results`)
+    return matches
+  } catch (err) {
+    console.warn('[api] Failed to fetch tournament matches:', err instanceof Error ? err.message : err)
+    return []
+  }
+}
+
+async function fetchTournamentPool(poolSize: number): Promise<RawMatch[]> {
+  const pages = Math.ceil(poolSize / 5)
+  const results = await Promise.all(
+    Array.from({ length: pages }, (_, i) => fetchTournamentMatches(i * 5))
+  )
+  const all = results.flat()
+  console.log(`[api] Tournament pool total: ${all.length} matches`)
+  return all
+}
+
+// Player-filtered tournament matches — query by PlayerId directly.
+async function fetchTournamentMatchesForPlayer(playerId: string, skip: number): Promise<RawMatch[]> {
+  try {
+    const res = await axios.get<MatchesGameResponse>(
+      `${BASE_URL}/tournament-matches?queryName=PlayerId&queryValue=${playerId}&skip=${skip}`,
+      { timeout: 8000 }
+    )
+    return res.data?.matches ?? []
+  } catch (err) {
+    console.warn(`[api] Failed to fetch tournament matches for player ${playerId}:`, err instanceof Error ? err.message : err)
+    return []
+  }
+}
+
+async function fetchTournamentPoolForPlayer(playerId: string, poolSize: number): Promise<RawMatch[]> {
+  const pages = Math.ceil(poolSize / 5)
+  const results = await Promise.all(
+    Array.from({ length: pages }, (_, i) => fetchTournamentMatchesForPlayer(playerId, i * 5))
+  )
+  return results.flat()
+}
+
+// Merge two match arrays, deduplicating by _id.
+function mergeMatches(a: RawMatch[], b: RawMatch[]): RawMatch[] {
+  const seen = new Set<string>()
+  const out: RawMatch[] = []
+  for (const m of [...a, ...b]) {
+    const key = String(m._id)
+    if (!seen.has(key)) {
+      seen.add(key)
+      out.push(m)
+    }
+  }
+  return out
+}
+
 // ── Supporting lookups ────────────────────────────────────────────────────────
 
 async function fetchYouTubeTitle(videoId: string): Promise<string | null> {
@@ -190,6 +281,9 @@ async function resolveMatch(match: RawMatch): Promise<Video> {
 
   const players = (playerResults as (Player | null)[]).filter((p): p is Player => p !== null)
 
+  const clipStart = parseTimestamp(match.ClipStart)
+  const clipEnd   = parseTimestamp(match.ClipEnd)
+
   return {
     _id: match._id,
     Url: match.VideoUrl,
@@ -199,83 +293,170 @@ async function resolveMatch(match: RawMatch): Promise<Video> {
     Game: gameTitle,
     Title: (title as string | null) ?? undefined,
     players: players.length ? players : undefined,
+    ...(clipStart !== undefined && { clipStart }),
+    ...(clipEnd   !== undefined && { clipEnd }),
   }
 }
 
 // ── Playlist builder ──────────────────────────────────────────────────────────
 
-export async function buildPlaylist(totalToFetch: number, playerId?: string): Promise<Video[]> {
+export interface MatchTypes {
+  online: boolean
+  tournament: boolean
+}
+
+export async function buildPlaylist(
+  totalToFetch: number,
+  playerIds?: string[],
+  matchTypes: MatchTypes = { online: true, tournament: true },
+): Promise<Video[]> {
+  // ── Player-filtered path (premium / non-admin accounts) ──────────────────
+  // Query the backend directly for each player's matches rather than sampling
+  // a small game pool and filtering client-side. This is reliable regardless
+  // of how active the player is.
+  if (playerIds && playerIds.length > 0) {
+    return buildPlaylistForPlayers(totalToFetch, playerIds, matchTypes)
+  }
+
+  // ── Admin path: all eligible recent matches ───────────────────────────────
   const games = await fetchGames()
 
-  // Filter to allowlisted games only
   const targetGames = ALLOWED_GAME_IDS
     ? games.filter((g) => ALLOWED_GAME_IDS.has(g.id))
     : games
 
-  if (targetGames.length === 0) return []
+  if (targetGames.length === 0 && !matchTypes.tournament) return []
 
-  // Fetch recent match pools for all target games in parallel
-  const pools = await Promise.all(
-    targetGames.map(async (game) => {
-      const skip = gameSkipOffset.get(game.id) ?? 0
-      const matches = await fetchRecentPoolForGame(game.id, RECENCY_POOL)
+  // Fetch online matches per-game + one global tournament pool in parallel.
+  // Tournament matches are NOT filtered per-game — the GameIds in the
+  // tournament-matches collection may differ from those in the games list.
+  const [gamePools, tournamentPool] = await Promise.all([
+    Promise.all(
+      targetGames.map(async (game) => {
+        const skip = gameSkipOffset.get(game.id) ?? 0
+        const matches = matchTypes.online
+          ? await fetchRecentPoolForGame(game.id, RECENCY_POOL)
+          : []
+        gameSkipOffset.set(game.id, skip + RECENCY_POOL)
 
-      // Advance the offset for next batch so we don't repeat the same videos
-      gameSkipOffset.set(game.id, skip + RECENCY_POOL)
+        // Recency filter applies only to online matches.
+        const cutoff = RECENCY_DAYS > 0
+          ? Date.now() - RECENCY_DAYS * 24 * 60 * 60 * 1000
+          : 0
+        const fresh = cutoff > 0
+          ? matches.filter((m) => {
+              const ts = parseInt(m._id.toString().substring(0, 8), 16) * 1000
+              return ts >= cutoff
+            })
+          : matches
 
-      // Drop matches older than RECENCY_DAYS. MongoDB ObjectIds embed a
-      // creation timestamp in their first 4 bytes, so we can filter purely
-      // client-side without a backend change.
-      const cutoff = RECENCY_DAYS > 0
-        ? Date.now() - RECENCY_DAYS * 24 * 60 * 60 * 1000
-        : 0
-      const fresh = cutoff > 0
-        ? matches.filter((m) => {
-            const ts = parseInt(m._id.toString().substring(0, 8), 16) * 1000
-            return ts >= cutoff
-          })
-        : matches
+        return { game, matches: shuffle(fresh) }
+      })
+    ),
+    matchTypes.tournament
+      ? fetchTournamentPool(RECENCY_POOL * Math.max(targetGames.length, 1))
+      : Promise.resolve([] as RawMatch[]),
+  ])
 
-      return { game, matches: shuffle(fresh) }
-    })
-  )
+  const activePools = gamePools.filter((p) => p.matches.length > 0)
+  const shuffledTournament = shuffle(tournamentPool)
 
-  // If a specific player is authenticated, filter pools to only their matches
-  const filteredPools = playerId
-    ? pools.map((p) => ({
-        ...p,
-        matches: p.matches.filter((m) =>
-          [...m.Team1Players, ...m.Team2Players].some((mp) => mp.Id === playerId)
-        ),
-      }))
-    : pools
+  if (activePools.length === 0 && shuffledTournament.length === 0) return []
 
-  const activePools = filteredPools.filter((p) => p.matches.length > 0)
-
-  if (activePools.length === 0) return []
-
-  // Round-robin across games to build a mixed playlist
+  // Round-robin: interleave online game pools and tournament matches.
+  // Every 3rd slot is a tournament match when both are available.
   const selected: RawMatch[] = []
+  const seen = new Set<string>()
   let gameIdx = 0
+  let tIdx = 0
 
   while (selected.length < totalToFetch) {
-    const pool = activePools[gameIdx % activePools.length]
-    gameIdx++
+    const wantTournament =
+      shuffledTournament.length > 0 &&
+      (activePools.length === 0 || selected.length % 3 === 2)
+    const wantOnline = activePools.length > 0 && !wantTournament
 
-    if (pool.matches.length === 0) continue
-
-    const match = pool.matches[selected.length % pool.matches.length]
-    selected.push(match)
+    if (wantTournament) {
+      const m = shuffledTournament[tIdx % shuffledTournament.length]
+      tIdx++
+      if (!seen.has(String(m._id))) {
+        seen.add(String(m._id))
+        selected.push(m)
+      } else if (tIdx >= shuffledTournament.length * 2) break
+    } else if (wantOnline) {
+      const pool = activePools[gameIdx % activePools.length]
+      gameIdx++
+      if (pool.matches.length === 0) continue
+      const m = pool.matches[selected.length % pool.matches.length]
+      if (!seen.has(String(m._id))) {
+        seen.add(String(m._id))
+        selected.push(m)
+      }
+    } else {
+      break
+    }
   }
 
-  // Resolve matches sequentially to avoid hammering the players API with
-  // too many simultaneous requests (which caused second-player lookups to fail)
   const videos: Video[] = []
   for (const match of selected) {
     videos.push(await resolveMatch(match))
   }
-
   return videos
+}
+
+// Fetch matches for one or more specific players by querying the backend
+// player-matches endpoint directly. Merges and deduplicates across players.
+async function buildPlaylistForPlayers(
+  totalToFetch: number,
+  playerIds: string[],
+  matchTypes: MatchTypes,
+): Promise<Video[]> {
+  // Fetch regular + tournament matches per player in parallel, then merge
+  const perPlayerMatches = await Promise.all(
+    playerIds.map(async (id) => {
+      const [regular, tournament] = await Promise.all([
+        matchTypes.online     ? fetchRecentPoolForPlayer(id, RECENCY_POOL)     : Promise.resolve([]),
+        matchTypes.tournament ? fetchTournamentPoolForPlayer(id, RECENCY_POOL) : Promise.resolve([]),
+      ])
+      return mergeMatches(regular, tournament)
+    })
+  )
+
+  // Merge across players and deduplicate by match _id
+  const seen = new Set<string>()
+  const allMatches: RawMatch[] = []
+  for (const matches of perPlayerMatches) {
+    for (const m of matches) {
+      const key = String(m._id)
+      if (!seen.has(key)) {
+        seen.add(key)
+        allMatches.push(m)
+      }
+    }
+  }
+
+  if (allMatches.length === 0) return []
+
+  // Shuffle and take up to totalToFetch
+  const selected = shuffle(allMatches).slice(0, totalToFetch)
+
+  const videos: Video[] = []
+  for (const match of selected) {
+    videos.push(await resolveMatch(match))
+  }
+  return videos
+}
+
+// Parse a timestamp string ("MM:SS", "H:MM:SS", or raw seconds as a string)
+// into an integer number of seconds. Returns undefined if blank or unparseable.
+function parseTimestamp(s: string | undefined): number | undefined {
+  if (!s || !s.trim()) return undefined
+  const parts = s.trim().split(':').map(Number)
+  if (parts.some(isNaN)) return undefined
+  if (parts.length === 1) return parts[0]
+  if (parts.length === 2) return parts[0] * 60 + parts[1]
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2]
+  return undefined
 }
 
 function shuffle<T>(arr: T[]): T[] {

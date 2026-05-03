@@ -30,10 +30,11 @@ const api = {
   connectTwitchBot: () => ipcRenderer.invoke('bot:connectTwitch'),
   disconnectTwitchBot: () => ipcRenderer.invoke('bot:disconnectTwitch'),
 
-  // ── Player URL + volume ────────────────────────────────────────────────────
+  // ── Player URL + volume + skip ────────────────────────────────────────────
   getPlayerUrl: () => ipcRenderer.invoke('player:getUrl'),
   getPlayerVolume: () => ipcRenderer.invoke('player:getVolume'),
   setPlayerVolume: (volume: number) => ipcRenderer.invoke('player:setVolume', volume),
+  skipVideo: () => ipcRenderer.invoke('player:skip'),
 
   // ── Window controls ────────────────────────────────────────────────────────
   minimizeWindow: () => ipcRenderer.send('window:minimize'),
@@ -44,6 +45,13 @@ const api = {
     const handler = (_event: Electron.IpcRendererEvent, status: unknown) => cb(status)
     ipcRenderer.on('worker:statusUpdate', handler)
     return () => ipcRenderer.removeListener('worker:statusUpdate', handler)
+  },
+
+  onTimeUpdate: (cb: (currentTime: number, duration: number) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: { currentTime: number; duration: number }) =>
+      cb(payload.currentTime, payload.duration)
+    ipcRenderer.on('player:timeUpdate', handler)
+    return () => ipcRenderer.removeListener('player:timeUpdate', handler)
   },
 }
 

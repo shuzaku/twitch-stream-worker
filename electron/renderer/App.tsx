@@ -14,6 +14,7 @@ export interface AuthUser {
   linkedPlayerName: string
   linkedPlayerSlug: string
   linkedPlayerImageUrl: string
+  linkedPlayers: { id: string; name: string; slug: string; imageUrl: string }[]
 }
 
 export default function App() {

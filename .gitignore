@@ -3,6 +3,7 @@ dist/
 dist-electron/
 dist-renderer/
 release/
+dist-release/
 .env
 *.log
 build/cert.pfx

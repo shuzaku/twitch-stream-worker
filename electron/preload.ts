@@ -26,6 +26,9 @@ const api = {
   saveSettings: (settings: Record<string, unknown>) =>
     ipcRenderer.invoke('settings:save', settings),
 
+  // ── Games ──────────────────────────────────────────────────────────────────
+  getAvailableGames: () => ipcRenderer.invoke('games:getAvailable'),
+
   // ── Twitch chat bot (optional, separate from FE identity) ─────────────────
   connectTwitchBot: () => ipcRenderer.invoke('bot:connectTwitch'),
   disconnectTwitchBot: () => ipcRenderer.invoke('bot:disconnectTwitch'),

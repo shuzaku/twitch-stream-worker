@@ -45,6 +45,8 @@ export default function Dashboard({ auth, onLogout }: Props) {
   const [timecode, setTimecode] = useState<{ currentTime: number; duration: number } | null>(null)
   const [matchTypeOnline, setMatchTypeOnline] = useState(true)
   const [matchTypeTournament, setMatchTypeTournament] = useState(true)
+  const [availableGames, setAvailableGames] = useState<{ id: string; title: string; abbreviation: string }[]>([])
+  const [enabledGameIds, setEnabledGameIds] = useState<string[]>([])
 
   function handleVolumeChange(val: number) {
     setVolumeState(val)
@@ -57,6 +59,22 @@ export default function Dashboard({ auth, onLogout }: Props) {
     window.api.saveSettings({ [type === 'online' ? 'matchTypeOnline' : 'matchTypeTournament']: val })
   }
 
+  function handleGameToggle(gameId: string) {
+    setEnabledGameIds((prev) => {
+      // Empty array = all enabled. Toggling a game in "all on" state switches
+      // to an explicit list with that game removed.
+      const allIds = availableGames.map((g) => g.id)
+      const current = prev.length === 0 ? allIds : prev
+      const next = current.includes(gameId)
+        ? current.filter((id) => id !== gameId)
+        : [...current, gameId]
+      // If everything is toggled back on, normalise to empty array (= all).
+      const normalised = next.length === allIds.length ? [] : next
+      window.api.saveSettings({ enabledGameIds: normalised })
+      return normalised
+    })
+  }
+
   // Load initial status and subscribe to live updates
   useEffect(() => {
     window.api.getStatus().then((s) => setStatus(s as WorkerStatus))
@@ -65,6 +83,13 @@ export default function Dashboard({ auth, onLogout }: Props) {
     window.api.getSettings().then((s: any) => {
       if (s.matchTypeOnline     !== undefined) setMatchTypeOnline(s.matchTypeOnline)
       if (s.matchTypeTournament !== undefined) setMatchTypeTournament(s.matchTypeTournament)
+      if (s.enabledGameIds      !== undefined) setEnabledGameIds(s.enabledGameIds)
+    })
+
+    window.api.getAvailableGames?.().then((res: any) => {
+      if (res?.ok && Array.isArray(res.games)) {
+        setAvailableGames(res.games)
+      }
     })
 
     const unsubStatus = window.api.onStatusUpdate((s) => {
@@ -107,7 +132,7 @@ export default function Dashboard({ auth, onLogout }: Props) {
       <div style={styles.titleBar}>
         <div style={styles.titleBarInner}>
           <Logo size={18} />
-          <span style={styles.titleBarText}>FightersEdge AutoStream</span>
+          <span style={styles.titleBarText}>FGC Loops</span>
         </div>
         <div style={styles.titleBarButtons}>
           <button style={styles.titleBarBtn} onClick={() => setView('settings')} title="Settings">
@@ -153,7 +178,7 @@ export default function Dashboard({ auth, onLogout }: Props) {
 
           {auth.accountType !== 'admin' && auth.accountType !== 'premium' ? (
             <div style={styles.adminGate}>
-              Only admin or premium accounts can start AutoStream.
+              Only admin or premium accounts can start FGC Loops.
             </div>
           ) : status.running ? (
             <button
@@ -288,6 +313,35 @@ export default function Dashboard({ auth, onLogout }: Props) {
           )}
         </div>
 
+        {/* Game filter toggles */}
+        {availableGames.length > 0 && (
+          <div style={styles.matchTypeCard}>
+            <div style={styles.matchTypeLabel}>Games</div>
+            <div style={styles.matchTypeRow}>
+              {availableGames.map((game) => {
+                const isOn = enabledGameIds.length === 0 || enabledGameIds.includes(game.id)
+                return (
+                  <label key={game.id} style={styles.matchTypeToggle}>
+                    <input
+                      type="checkbox"
+                      checked={isOn}
+                      disabled={status.running}
+                      onChange={() => handleGameToggle(game.id)}
+                      style={styles.matchTypeCheckbox}
+                    />
+                    <span style={isOn ? styles.matchTypeChipOn : styles.matchTypeChipOff}>
+                      {game.abbreviation || game.title}
+                    </span>
+                  </label>
+                )
+              })}
+            </div>
+            {status.running && (
+              <div style={styles.matchTypeHint}>Stop the stream to change games.</div>
+            )}
+          </div>
+        )}
+
         {/* OBS Setup link */}
         <button style={styles.obsNavBtn} onClick={() => setView('obs')}>
           <span>OBS Setup</span>
@@ -362,7 +416,7 @@ function OBSSetupView({ onBack, playerUrl }: { onBack: () => void; playerUrl: st
             <OBSStep n={3} text='Set Server Port to 4455 (default)' />
             <OBSStep n={4} text='Enable authentication and set a password' />
             <OBSStep n={5} text='Click Apply → OK' />
-            <OBSStep n={6} text='Enter the same URL and password in AutoStream Settings (⚙)' />
+            <OBSStep n={6} text='Enter the same URL and password in FGC Loops Settings (⚙)' />
           </div>
         )}
 

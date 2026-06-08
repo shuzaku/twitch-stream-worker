@@ -1,10 +1,10 @@
-appId: com.fightersedge.autostream
-productName: FightersEdge AutoStream
+appId: com.fightersedge.fgcloops
+productName: FGC Loops
 copyright: Copyright © 2026 FightersEdge
 
 directories:
   buildResources: build
-  output: release
+  output: dist-release
 
 files:
   - dist-electron/**
@@ -31,6 +31,6 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: FightersEdge AutoStream
+  shortcutName: FGC Loops
 
 publish: null

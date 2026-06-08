@@ -309,28 +309,31 @@ export async function buildPlaylist(
   totalToFetch: number,
   playerIds?: string[],
   matchTypes: MatchTypes = { online: true, tournament: true },
+  enabledGameIds?: string[],
 ): Promise<Video[]> {
   // ── Player-filtered path (premium / non-admin accounts) ──────────────────
   // Query the backend directly for each player's matches rather than sampling
   // a small game pool and filtering client-side. This is reliable regardless
   // of how active the player is.
   if (playerIds && playerIds.length > 0) {
-    return buildPlaylistForPlayers(totalToFetch, playerIds, matchTypes)
+    return buildPlaylistForPlayers(totalToFetch, playerIds, matchTypes, enabledGameIds)
   }
 
   // ── Admin path: all eligible recent matches ───────────────────────────────
   const games = await fetchGames()
 
-  const targetGames = ALLOWED_GAME_IDS
-    ? games.filter((g) => ALLOWED_GAME_IDS.has(g.id))
-    : games
+  const enabledSet = enabledGameIds && enabledGameIds.length > 0 ? new Set(enabledGameIds) : null
+
+  const targetGames = games.filter((g) => {
+    if (ALLOWED_GAME_IDS && !ALLOWED_GAME_IDS.has(g.id)) return false
+    if (enabledSet && !enabledSet.has(g.id)) return false
+    return true
+  })
 
   if (targetGames.length === 0 && !matchTypes.tournament) return []
 
   // Fetch online matches per-game + one global tournament pool in parallel.
-  // Tournament matches are NOT filtered per-game — the GameIds in the
-  // tournament-matches collection may differ from those in the games list.
-  const [gamePools, tournamentPool] = await Promise.all([
+  const [gamePools, rawTournamentPool] = await Promise.all([
     Promise.all(
       targetGames.map(async (game) => {
         const skip = gameSkipOffset.get(game.id) ?? 0
@@ -357,6 +360,11 @@ export async function buildPlaylist(
       ? fetchTournamentPool(RECENCY_POOL * Math.max(targetGames.length, 1))
       : Promise.resolve([] as RawMatch[]),
   ])
+
+  // Apply game filter to tournament matches when a game selection is active.
+  const tournamentPool = enabledSet
+    ? rawTournamentPool.filter((m) => m.GameId && enabledSet.has(m.GameId))
+    : rawTournamentPool
 
   const activePools = gamePools.filter((p) => p.matches.length > 0)
   const shuffledTournament = shuffle(tournamentPool)
@@ -410,7 +418,9 @@ async function buildPlaylistForPlayers(
   totalToFetch: number,
   playerIds: string[],
   matchTypes: MatchTypes,
+  enabledGameIds?: string[],
 ): Promise<Video[]> {
+  const enabledSet = enabledGameIds && enabledGameIds.length > 0 ? new Set(enabledGameIds) : null
   // Fetch regular + tournament matches per player in parallel, then merge
   const perPlayerMatches = await Promise.all(
     playerIds.map(async (id) => {
@@ -435,10 +445,14 @@ async function buildPlaylistForPlayers(
     }
   }
 
-  if (allMatches.length === 0) return []
+  const filteredMatches = enabledSet
+    ? allMatches.filter((m) => m.GameId && enabledSet.has(m.GameId))
+    : allMatches
+
+  if (filteredMatches.length === 0) return []
 
   // Shuffle and take up to totalToFetch
-  const selected = shuffle(allMatches).slice(0, totalToFetch)
+  const selected = shuffle(filteredMatches).slice(0, totalToFetch)
 
   const videos: Video[] = []
   for (const match of selected) {

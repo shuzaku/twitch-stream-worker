@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────────
-//  Build-time configuration for FightersEdge AutoStream
+//  Build-time configuration for FGC Loops
 // ─────────────────────────────────────────────────────────────────────────────
 //
 //  This file is the SINGLE source of truth for every value the shipped

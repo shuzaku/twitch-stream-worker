@@ -1,8 +1,8 @@
 {
-  "name": "fighters-edge-autostream",
-  "productName": "FightersEdge AutoStream",
+  "name": "fgc-loops",
+  "productName": "FGC Loops",
   "version": "1.0.0",
-  "description": "Automated Twitch streaming desktop app for FightersEdge — streams your match VODs while you're away",
+  "description": "Automated stream loop app for FightersEdge — plays high-level FGC match VODs continuously via OBS",
   "main": "dist-electron/electron/main.js",
   "type": "commonjs",
   "scripts": {

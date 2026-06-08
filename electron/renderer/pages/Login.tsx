@@ -38,7 +38,7 @@ export default function Login({ onLogin }: Props) {
           <Logo size={52} />
           <div>
             <div style={styles.brand}>FightersEdge</div>
-            <div style={styles.product}>AutoStream</div>
+            <div style={styles.product}>FGC Loops</div>
           </div>
         </div>
 
@@ -65,7 +65,7 @@ export default function Login({ onLogin }: Props) {
         {error && <p style={styles.error}>{error}</p>}
 
         <p style={styles.footer}>
-          Stream destinations (Twitch, YouTube, etc.) are configured directly in OBS — AutoStream
+          Stream destinations (Twitch, YouTube, etc.) are configured directly in OBS — FGC Loops
           only handles the playlist and automation.
         </p>
       </div>

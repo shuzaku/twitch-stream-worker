@@ -52,6 +52,8 @@ interface StoreSchema {
   obsSetupDone: boolean
   matchTypeOnline: boolean
   matchTypeTournament: boolean
+  // Empty array = all allowed games enabled; non-empty = explicit whitelist
+  enabledGameIds: string[]
 }
 
 const store = new ElectronStore<StoreSchema>({
@@ -66,6 +68,7 @@ const store = new ElectronStore<StoreSchema>({
     obsSetupDone: false,
     matchTypeOnline: true,
     matchTypeTournament: true,
+    enabledGameIds: [],
   },
 })
 
@@ -209,11 +212,13 @@ async function startWorkerProcess() {
 
   const matchTypeOnline     = (store.get as (k: string, d: boolean) => boolean)('matchTypeOnline', true)
   const matchTypeTournament = (store.get as (k: string, d: boolean) => boolean)('matchTypeTournament', true)
+  const enabledGameIds      = (store.get as (k: string, d: string[]) => string[])('enabledGameIds', [])
 
   workerRunning = true
   workerModule.startWorker({
     playerIds,
     matchTypes: { online: matchTypeOnline, tournament: matchTypeTournament },
+    enabledGameIds: enabledGameIds.length > 0 ? enabledGameIds : undefined,
     obsUrl,
     obsPassword,
     twitchChannel,
@@ -265,17 +270,17 @@ function startDeviceCallbackServer(): Promise<{ token: string } | { error: strin
         res.writeHead(200, { 'Content-Type': 'text/html' })
         if (token) {
           res.end(`<!DOCTYPE html>
-<html><head><title>FightersEdge AutoStream</title>
+<html><head><title>FGC Loops</title>
 <style>body{font-family:sans-serif;background:#1a1d24;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;text-align:center}div{max-width:360px}h1{color:#3eb489;margin:0 0 12px}</style>
-</head><body><div><h1>Connected!</h1><p>You can close this tab and return to FightersEdge AutoStream.</p></div></body></html>`)
+</head><body><div><h1>Connected!</h1><p>You can close this tab and return to FGC Loops.</p></div></body></html>`)
           server.close()
           callbackServer = null
           resolve({ token })
         } else {
           res.end(`<!DOCTYPE html>
-<html><head><title>FightersEdge AutoStream</title>
+<html><head><title>FGC Loops</title>
 <style>body{font-family:sans-serif;background:#1a1d24;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;text-align:center}div{max-width:360px}h1{color:#ff6b6b;margin:0 0 12px}</style>
-</head><body><div><h1>Authorization cancelled</h1><p>Return to FightersEdge AutoStream to try again.</p></div></body></html>`)
+</head><body><div><h1>Authorization cancelled</h1><p>Return to FGC Loops to try again.</p></div></body></html>`)
           server.close()
           callbackServer = null
           resolve({ error: error || 'denied' })
@@ -315,7 +320,7 @@ async function doFightersEdgeLogin(): Promise<AuthUser> {
   const consentUrl =
     `${FE_WEB_BASE}/device-auth` +
     `?redirect_uri=${encodeURIComponent(DEVICE_CALLBACK_URI)}` +
-    `&device_name=${encodeURIComponent('FightersEdge AutoStream')}`
+    `&device_name=${encodeURIComponent('FGC Loops')}`
 
   await shell.openExternal(consentUrl)
 
@@ -389,7 +394,7 @@ function startTwitchBotCallbackServer(): Promise<string> {
         // it client-side and POSTs it back to /twitch-bot-token below.
         res.writeHead(200, { 'Content-Type': 'text/html' })
         res.end(`<!DOCTYPE html>
-<html><head><title>FightersEdge AutoStream</title>
+<html><head><title>FGC Loops</title>
 <style>body{font-family:sans-serif;background:#1a1d24;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;text-align:center}div{max-width:360px}h1{color:#3eb489;margin:0 0 12px}</style>
 </head><body><div><h1 id="t">Connecting Twitch bot...</h1><p id="p">One moment.</p></div>
 <script>
@@ -398,7 +403,7 @@ function startTwitchBotCallbackServer(): Promise<string> {
   if (!token) {
     document.getElementById('t').textContent = 'Authorization cancelled'
     document.getElementById('t').style.color = '#ff6b6b'
-    document.getElementById('p').textContent = 'Return to FightersEdge AutoStream to try again.'
+    document.getElementById('p').textContent = 'Return to FGC Loops to try again.'
     fetch('/twitch-bot-token', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ error: 'denied' }) }).catch(()=>{})
   } else {
     fetch('/twitch-bot-token', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ token }) })
@@ -613,6 +618,7 @@ ipcMain.handle('settings:get', () => ({
   obsSetupDone: store.get('obsSetupDone'),
   matchTypeOnline: store.get('matchTypeOnline'),
   matchTypeTournament: store.get('matchTypeTournament'),
+  enabledGameIds: store.get('enabledGameIds'),
 }))
 
 ipcMain.handle('settings:save', (_event, settings: Partial<StoreSchema>) => {
@@ -625,7 +631,23 @@ ipcMain.handle('settings:save', (_event, settings: Partial<StoreSchema>) => {
   if (settings.obsSetupDone !== undefined)        store.set('obsSetupDone', settings.obsSetupDone)
   if (settings.matchTypeOnline !== undefined)     store.set('matchTypeOnline', settings.matchTypeOnline)
   if (settings.matchTypeTournament !== undefined) store.set('matchTypeTournament', settings.matchTypeTournament)
+  if (settings.enabledGameIds !== undefined)      store.set('enabledGameIds', settings.enabledGameIds)
   return { ok: true }
+})
+
+// Returns the curated list of allowed games (filtered to Config.GAME_IDS).
+// Fetches from the FE API on first call; result is cached in api.ts.
+ipcMain.handle('games:getAvailable', async () => {
+  try {
+    const { fetchGames } = require('../src/api') as typeof import('../src/api')
+    const { Config: Cfg } = require('../src/config') as typeof import('../src/config')
+    const all = await fetchGames()
+    const allowed = new Set(Cfg.GAME_IDS)
+    const filtered = allowed.size > 0 ? all.filter((g) => allowed.has(g.id)) : all
+    return { ok: true, games: filtered }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err), games: [] }
+  }
 })
 
 ipcMain.handle('player:getUrl', () => PLAYER_URL)

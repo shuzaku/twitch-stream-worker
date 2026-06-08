@@ -54,6 +54,7 @@ function updateStatus(patch: Partial<WorkerStatus>) {
 export async function startWorker(options?: {
   playerIds?: string[]
   matchTypes?: MatchTypes
+  enabledGameIds?: string[]
   obsUrl?: string
   obsPassword?: string
   twitchChannel?: string
@@ -83,7 +84,7 @@ export async function startWorker(options?: {
     let initialPlaylist: Video[] = []
 
     await Promise.all([
-      buildPlaylist(QUEUE_SIZE, options?.playerIds, options?.matchTypes)
+      buildPlaylist(QUEUE_SIZE, options?.playerIds, options?.matchTypes, options?.enabledGameIds)
         .then((videos) => { initialPlaylist = videos })
         .catch((err) => console.error('[worker] Failed to pre-fetch playlist:', err)),
       obs.connect()
@@ -115,7 +116,7 @@ export async function startWorker(options?: {
       if (playlistIndex >= playlist.length) {
         console.log('[worker] Fetching new playlist batch...')
         try {
-          playlist = await buildPlaylist(QUEUE_SIZE, options?.playerIds, options?.matchTypes)
+          playlist = await buildPlaylist(QUEUE_SIZE, options?.playerIds, options?.matchTypes, options?.enabledGameIds)
           playlistIndex = 0
           console.log(`[worker] Loaded ${playlist.length} videos into queue`)
           updateStatus({ queueSize: playlist.length - playlistIndex })

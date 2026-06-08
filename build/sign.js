@@ -27,7 +27,7 @@ const CERT_PATH = process.env.CSC_LINK
 
 const CERT_PASSWORD = process.env.CSC_KEY_PASSWORD || 'fightersedge2026'
 
-const RELEASE_DIR = path.join(__dirname, '..', 'release')
+const RELEASE_DIR = path.join(__dirname, '..', 'dist-release')
 const UNPACKED_DIR = path.join(RELEASE_DIR, 'win-unpacked')
 
 const signInstaller = process.argv.includes('--installer')
@@ -46,7 +46,7 @@ function sign(filePath) {
     '/fd', 'sha256',
     '/f', CERT_PATH,
     '/p', CERT_PASSWORD,
-    '/d', 'FightersEdge AutoStream',
+    '/d', 'FGC Loops',
     filePath,
   ], { stdio: 'inherit' })
 }

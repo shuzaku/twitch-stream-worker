@@ -213,7 +213,7 @@ function StepTest({
   return (
     <div style={styles.stepContent}>
       <p style={styles.testDesc}>
-        Click the button below to verify AutoStream can connect to OBS. Make sure OBS is open.
+        Click the button below to verify FGC Loops can connect to OBS. Make sure OBS is open.
       </p>
 
       <button
